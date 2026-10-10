@@ -1,5 +1,7 @@
 # CloudGuard Scan Platform
 
+[![CI](https://github.com/zengqi7/cloud-security-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/zengqi7/cloud-security-platform/actions/workflows/ci.yml)
+
 面向研发发布流水线的多租户云原生安全检查服务。调用方提交容器镜像或 Kubernetes workload，平台异步执行 Trivy 漏洞扫描与 OPA 基线检查，统一归一化风险、生成发布门禁结论，并保留可查询的任务状态和结果。
 
 ## 应用场景
