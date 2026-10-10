@@ -1,0 +1,6 @@
+{
+ "apiVersion":"apps/v1",
+ "kind":"Deployment",
+ "metadata":{"name":"checkout-api","namespace":"staging"},
+ "spec":{"template":{"spec":{"hostNetwork":true,"containers":[{"name":"api","image":"nginx:latest","securityContext":{"privileged":true}}]}}}
+}
