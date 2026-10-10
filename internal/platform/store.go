@@ -179,16 +179,31 @@ func OpenStore(dsn string) (Store, error) {
 	db.SetMaxOpenConns(12)
 	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(5 * time.Minute)
+	s := Store{DB: db}
+	if err := waitForMySQL(s, 60*time.Second); err != nil {
+		db.Close()
+		return Store{}, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	s := Store{DB: db}
-	if err := s.Ping(ctx); err != nil {
-		db.Close()
-		return Store{}, fmt.Errorf("mysql: %w", err)
-	}
 	if err := s.Init(ctx); err != nil {
 		db.Close()
 		return Store{}, err
 	}
 	return s, nil
+}
+
+func waitForMySQL(store Store, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		lastErr = store.Ping(ctx)
+		cancel()
+		if lastErr == nil {
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("mysql not ready after %s: %w", timeout, lastErr)
 }

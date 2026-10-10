@@ -29,8 +29,8 @@
 
 ```powershell
 Copy-Item .env.example .env
-docker compose -f deployments/docker-compose.yaml up --build -d
-docker compose -f deployments/docker-compose.yaml ps
+docker compose up --build -d
+docker compose ps
 ```
 
 默认 API：`http://127.0.0.1:8082`。Compose 镜像内固定包含 Trivy 0.75.0 和 OPA 1.21.1。
