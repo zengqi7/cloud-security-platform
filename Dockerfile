@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/server &
 FROM aquasec/trivy:0.75.0 AS trivy
 FROM openpolicyagent/opa:1.21.1-static AS opa
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates wget && addgroup -S app && adduser -S -G app app && mkdir -p /data/trivy-cache && chown -R app:app /data
 COPY --from=build /out/ /usr/local/bin/
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
