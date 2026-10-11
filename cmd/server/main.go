@@ -13,10 +13,6 @@ import (
 )
 
 func main() {
-	tokens, err := platform.ParseTokens(os.Getenv("SCAN_API_TOKENS"))
-	if err != nil {
-		log.Fatal(err)
-	}
 	dsn := os.Getenv("MYSQL_DSN")
 	if dsn == "" {
 		log.Fatal("MYSQL_DSN is required")
@@ -26,7 +22,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.DB.Close()
-	api := &platform.API{Repo: store, Tokens: tokens}
+	api := &platform.API{Repo: store, Auth: store}
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8082"

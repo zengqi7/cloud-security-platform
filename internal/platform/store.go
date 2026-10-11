@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"cloud-security-platform/internal/auth"
 	"cloud-security-platform/internal/migration"
 	"context"
 	"crypto/rand"
@@ -35,8 +36,25 @@ func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, 
 	if err != nil {
 		return Job{}, false, err
 	}
-	_, err = s.DB.ExecContext(ctx, `INSERT INTO scan_jobs(id,tenant,idempotency_key,request_hash,request_json,findings_json) VALUES(?,?,?,?,?,JSON_ARRAY())`, id, tenant, key, RequestHash(r), raw)
+	subject, source := "operator-direct", "worker-tool"
+	p, authenticated := auth.FromContext(ctx)
+	if authenticated {
+		if p.Tenant != tenant || !p.Allows("scans:submit") || (r.Kind == "trivy_report" && !p.Allows("reports:import")) {
+			return Job{}, false, auth.ErrUnauthorized
+		}
+		subject = p.Subject
+	}
+	if r.Kind == "trivy_report" {
+		source = "ci-import-unverified"
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
+		return Job{}, false, err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO scan_jobs(id,tenant,idempotency_key,request_hash,request_json,findings_json,submitted_by,evidence_source) VALUES(?,?,?,?,?,JSON_ARRAY(),?,?)`, id, tenant, key, RequestHash(r), raw, subject, source)
+	if err != nil {
+		tx.Rollback()
 		var duplicate *mysqlerr.MySQLError
 		if !errors.As(err, &duplicate) || duplicate.Number != 1062 {
 			return Job{}, false, err
@@ -51,18 +69,26 @@ func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, 
 		job, err := s.Get(ctx, tenant, existingID)
 		return job, true, err
 	}
+	if authenticated {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO scan_audit_events(tenant,key_id,subject,action,resource,outcome) VALUES(?,?,?,'scan:submit',?,'succeeded')`, tenant, p.KeyID, p.Subject, id); err != nil {
+			return Job{}, false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Job{}, false, err
+	}
 	job, err := s.Get(ctx, tenant, id)
 	return job, false, err
 }
 
-const selectJob = `SELECT id,tenant,status,request_json,attempts,COALESCE(error_text,''),summary_json,created_at,finished_at,COALESCE(lease_token,'') FROM scan_jobs `
+const selectJob = `SELECT id,tenant,status,request_json,attempts,COALESCE(error_text,''),summary_json,created_at,finished_at,COALESCE(lease_token,''),submitted_by,evidence_source FROM scan_jobs `
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanJob(row rowScanner) (Job, error) {
 	var j Job
 	var request, summary []byte
-	err := row.Scan(&j.ID, &j.Tenant, &j.Status, &request, &j.Attempts, &j.Error, &summary, &j.CreatedAt, &j.FinishedAt, &j.LeaseToken)
+	err := row.Scan(&j.ID, &j.Tenant, &j.Status, &request, &j.Attempts, &j.Error, &summary, &j.CreatedAt, &j.FinishedAt, &j.LeaseToken, &j.SubmittedBy, &j.EvidenceSource)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -145,7 +171,7 @@ func (s Store) Finish(ctx context.Context, job Job, findings []Finding, scanErr 
 		findings = []Finding{}
 	}
 	findings = NormalizeFindings(findings)
-	summaryJob := Job{Status: status, Findings: findings}
+	summaryJob := Job{Status: status, Findings: findings, Request: job.Request}
 	raw, err := json.Marshal(Summarize(summaryJob))
 	if err != nil {
 		return err

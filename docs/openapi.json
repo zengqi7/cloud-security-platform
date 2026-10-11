@@ -1,9 +1,10 @@
 {
   "openapi": "3.1.0",
   "info": {
+    "description": "Database Bearer keys require scans:read for GET, scans:submit for submission, and reports:import for imported reports. Invalid keys return 401; missing scope 403; auth/audit outage 503. Clean unverified imported reports never pass the release gate.",
     "title": "Cloud Security Platform",
     "version": "0.1.0",
-    "description": "Baseline contract. See docs/contracts.md for compatibility and delivery guarantees."
+    "x-contract": "See docs/contracts.md for compatibility and delivery guarantees."
   },
   "paths": {
     "/healthz": {

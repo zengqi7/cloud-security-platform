@@ -1,8 +1,8 @@
 package platform
 
 import (
+	"cloud-security-platform/internal/auth"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,7 +23,7 @@ type Repository interface {
 }
 type API struct {
 	Repo      Repository
-	Tokens    map[string]string
+	Auth      auth.Repository
 	Submitted atomic.Uint64
 }
 
@@ -56,36 +56,36 @@ func (a *API) auth(next http.Handler) http.Handler {
 			respond(w, 401, map[string]string{"error": "Bearer token required"})
 			return
 		}
-		token := strings.TrimPrefix(header, "Bearer ")
-		tenant := ""
-		for name, expected := range a.Tokens {
-			if subtle.ConstantTimeCompare([]byte(token), []byte(expected)) == 1 {
-				tenant = name
-			}
-		}
-		if tenant == "" {
-			respond(w, 401, map[string]string{"error": "invalid token"})
+		if a.Auth == nil {
+			respond(w, 503, map[string]string{"error": "authentication unavailable"})
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), tenantContextKey{}, tenant), 10*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
+		p, err := a.Auth.Authenticate(ctx, strings.TrimPrefix(header, "Bearer "))
+		if err != nil {
+			status := 503
+			if errors.Is(err, auth.ErrUnauthorized) {
+				status = 401
+			}
+			respond(w, status, map[string]string{"error": "credential unavailable or invalid"})
+			return
+		}
+		scope := "scans:read"
+		if r.Method != http.MethodGet {
+			scope = "scans:submit"
+		}
+		if !p.Allows(scope) {
+			respond(w, 403, map[string]string{"error": "insufficient scope"})
+			return
+		}
+		if err := a.Auth.Audit(ctx, p, r.Method, r.URL.Path, "admitted"); err != nil {
+			respond(w, 503, map[string]string{"error": "audit unavailable"})
+			return
+		}
+		ctx = auth.WithPrincipal(context.WithValue(ctx, tenantContextKey{}, p.Tenant), p)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-func ParseTokens(raw string) (map[string]string, error) {
-	var tokens map[string]string
-	if err := json.Unmarshal([]byte(raw), &tokens); err != nil || len(tokens) == 0 {
-		return nil, errors.New("SCAN_API_TOKENS must be a JSON map from tenant to token")
-	}
-	names := regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
-	seen := map[string]bool{}
-	for tenant, token := range tokens {
-		if !names.MatchString(tenant) || len(token) < 16 || seen[token] {
-			return nil, errors.New("invalid tenant, short token or duplicate token in SCAN_API_TOKENS")
-		}
-		seen[token] = true
-	}
-	return tokens, nil
 }
 
 var scanID = regexp.MustCompile(`^[a-f0-9]{32}$`)
@@ -112,6 +112,13 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			key := r.Header.Get("Idempotency-Key")
+			if req.Kind == "trivy_report" {
+				p, _ := auth.FromContext(r.Context())
+				if !p.Allows("reports:import") {
+					respond(w, 403, map[string]string{"error": "reports:import required"})
+					return
+				}
+			}
 			if len(key) > 128 {
 				respond(w, 400, map[string]string{"error": "Idempotency-Key exceeds 128 bytes"})
 				return
@@ -223,7 +230,7 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"items": filtered[offset:end], "total": total, "offset": offset, "limit": limit})
 }
 func jobOverview(j Job) map[string]any {
-	return map[string]any{"id": j.ID, "tenant": j.Tenant, "kind": j.Request.Kind, "target": j.Request.Target, "status": j.Status, "attempts": j.Attempts, "error": j.Error, "created_at": j.CreatedAt, "finished_at": j.FinishedAt, "summary": Summarize(j)}
+	return map[string]any{"id": j.ID, "tenant": j.Tenant, "kind": j.Request.Kind, "target": j.Request.Target, "status": j.Status, "attempts": j.Attempts, "error": j.Error, "created_at": j.CreatedAt, "finished_at": j.FinishedAt, "summary": Summarize(j), "submitted_by": j.SubmittedBy, "evidence_source": j.EvidenceSource}
 }
 func (a *API) failure(w http.ResponseWriter, err error) {
 	if errors.Is(err, ErrNotFound) {

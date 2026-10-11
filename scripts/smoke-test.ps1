@@ -4,7 +4,7 @@ param(
  [switch]$RealImageScan
 )
 $ErrorActionPreference = 'Stop'
-if (-not $Token) { throw 'Set SCAN_TOKEN to a configured tenant token' }
+if (-not $Token) { throw 'Set SCAN_TOKEN to a database API key with scans:read,scans:submit' }
 $headers = @{Authorization="Bearer $Token";'Idempotency-Key'=('smoke-'+[guid]::NewGuid().ToString('N'))}
 $root = Split-Path -Parent $PSScriptRoot
 $body = @{

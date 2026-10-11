@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"cloud-security-platform/internal/auth"
 	"context"
 	"encoding/json"
 	"errors"
@@ -52,13 +53,18 @@ func TestPolicyInputWorkloadsAndInitContainers(t *testing.T) {
 		t.Fatal("unsupported kinds must not yield a passing empty scan")
 	}
 }
-func TestTokensRejectAmbiguousTenants(t *testing.T) {
-	for _, raw := range []string{`{}`, `{"acme":"short"}`, `{"acme":"same-long-token-123","beta":"same-long-token-123"}`} {
-		if _, err := ParseTokens(raw); err == nil {
-			t.Fatal("accepted ambiguous tokens")
+
+type testAuth map[string]string
+
+func (a testAuth) Authenticate(_ context.Context, token string) (auth.Principal, error) {
+	for tenant, expected := range a {
+		if token == expected {
+			return auth.Principal{Tenant: tenant, Subject: "test", Scopes: []string{"scans:read", "scans:submit"}}, nil
 		}
 	}
+	return auth.Principal{}, auth.ErrUnauthorized
 }
+func (testAuth) Audit(context.Context, auth.Principal, string, string, string) error { return nil }
 
 type memoryRepo struct {
 	job         Job
@@ -101,7 +107,7 @@ func apiRequest(h http.Handler, method, path, token, body string) *httptest.Resp
 }
 func TestAPIAuthenticatesAndScopesTenant(t *testing.T) {
 	repo := &memoryRepo{job: Job{ID: strings.Repeat("a", 32), Tenant: "beta", Status: "succeeded", Findings: []Finding{}}}
-	api := &API{Repo: repo, Tokens: map[string]string{"acme": "acme-test-token-123", "beta": "beta-test-token-123"}}
+	api := &API{Repo: repo, Auth: testAuth{"acme": "acme-test-token-123", "beta": "beta-test-token-123"}}
 	h := api.Handler()
 	path := "/api/v1/scans/" + strings.Repeat("a", 32)
 	if w := apiRequest(h, "GET", path, "", ""); w.Code != 401 {
@@ -116,7 +122,7 @@ func TestAPIAuthenticatesAndScopesTenant(t *testing.T) {
 }
 func TestAPISubmitsAndRejectsMalformedBodies(t *testing.T) {
 	repo := &memoryRepo{}
-	api := &API{Repo: repo, Tokens: map[string]string{"acme": "acme-test-token-123"}}
+	api := &API{Repo: repo, Auth: testAuth{"acme": "acme-test-token-123"}}
 	h := api.Handler()
 	good := `{"kind":"image","target":"alpine:3.22"}`
 	if w := apiRequest(h, "POST", "/api/v1/scans", "acme-test-token-123", good); w.Code != 202 || repo.key != "release-42" || repo.tenant != "acme" {

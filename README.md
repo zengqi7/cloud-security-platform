@@ -27,12 +27,13 @@
 
 ## 快速启动
 
-要求 Docker Compose v2。先配置随机密码和至少 16 字符的 API token：
+要求 Docker Compose v2。先配置随机数据库密码，启动后签发短期 API Key：
 
 ```powershell
 Copy-Item .env.example .env
 docker compose up --build -d
 docker compose ps
+docker compose run --rm --entrypoint key api -tenant acme -subject ci-checkout -scopes scans:read,scans:submit -ttl 24h
 ```
 
 默认 API：`http://127.0.0.1:8082`。Compose 镜像内固定包含 Trivy 0.75.0 和 OPA 1.21.1。
@@ -90,14 +91,15 @@ $env:OPA_BIN=(Resolve-Path .\tools\opa.exe)
 
 ```powershell
 $env:MYSQL_DSN='cloud_app:password@tcp(127.0.0.1:3307)/cloud_security?parseTime=true&charset=utf8mb4&loc=UTC'
-$env:SCAN_API_TOKENS='{"acme":"replace-with-at-least-16-random-characters"}'
+go run ./cmd/migrate
+go run ./cmd/key -tenant acme -subject developer -scopes scans:read,scans:submit -ttl 24h
 go run ./cmd/server
 go run ./cmd/worker
 ```
 
 ## 安全边界
 
-- V1 token 来自环境变量，日志不会输出 token；生产环境应由 secret manager 注入。
+- API Key 由数据库管理主体、权限、有效期和吊销，原文仅签发时输出；详见 docs/authentication.md。旧 SCAN_API_TOKENS 不再使用。
 - API 默认仅绑定本机，公开部署必须置于 TLS 反向代理之后。
 - Trivy 只启用漏洞扫描并限制为 remote image source；不把客户端输入交给 shell。
 - OPA 仅加载部署时固定的策略路径。

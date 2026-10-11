@@ -22,17 +22,19 @@ type Request struct {
 	Report   json.RawMessage `json:"report,omitempty"`
 }
 type Job struct {
-	ID            string     `json:"id"`
-	Tenant        string     `json:"tenant"`
-	Status        string     `json:"status"`
-	Request       Request    `json:"request"`
-	Attempts      int        `json:"attempts"`
-	Error         string     `json:"error,omitempty"`
-	Findings      []Finding  `json:"findings"`
-	CreatedAt     time.Time  `json:"created_at"`
-	FinishedAt    *time.Time `json:"finished_at,omitempty"`
-	LeaseToken    string     `json:"-"`
-	StoredSummary *Summary   `json:"-"`
+	ID             string     `json:"id"`
+	Tenant         string     `json:"tenant"`
+	Status         string     `json:"status"`
+	Request        Request    `json:"request"`
+	Attempts       int        `json:"attempts"`
+	Error          string     `json:"error,omitempty"`
+	Findings       []Finding  `json:"findings"`
+	CreatedAt      time.Time  `json:"created_at"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	LeaseToken     string     `json:"-"`
+	StoredSummary  *Summary   `json:"-"`
+	SubmittedBy    string     `json:"submitted_by"`
+	EvidenceSource string     `json:"evidence_source"`
 }
 type Finding struct {
 	Fingerprint      string `json:"fingerprint"`
@@ -75,6 +77,10 @@ func Summarize(job Job) Summary {
 		if s.Counts["UNKNOWN"] > 0 {
 			s.Gate = "error"
 			s.Reason = "unknown finding severity; no release approval"
+		}
+		if job.Request.Kind == "trivy_report" && s.Gate == "pass" {
+			s.Gate = "error"
+			s.Reason = "imported report is not independently verified release evidence"
 		}
 	}
 	return s
