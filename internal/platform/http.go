@@ -75,6 +75,9 @@ func (a *API) auth(next http.Handler) http.Handler {
 		if r.Method != http.MethodGet {
 			scope = "scans:submit"
 		}
+		if strings.HasPrefix(r.URL.Path, "/api/v1/policies") && r.Method != http.MethodGet {
+			scope = "policies:publish"
+		}
 		if !p.Allows(scope) {
 			respond(w, 403, map[string]string{"error": "insufficient scope"})
 			return
@@ -92,6 +95,9 @@ var scanID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
 func (a *API) route(w http.ResponseWriter, r *http.Request) {
 	tenant, _ := r.Context().Value(tenantContextKey{}).(string)
+	if a.governance(w, r, tenant) {
+		return
+	}
 	if r.URL.Path == "/api/v1/scans" {
 		switch r.Method {
 		case http.MethodPost:
@@ -258,9 +264,17 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"items": filtered[offset:end], "total": total, "offset": offset, "limit": limit})
 }
 func jobOverview(j Job) map[string]any {
-	return map[string]any{"id": j.ID, "tenant": j.Tenant, "kind": j.Request.Kind, "target": j.Request.Target, "status": j.Status, "attempts": j.Attempts, "error": j.Error, "created_at": j.CreatedAt, "finished_at": j.FinishedAt, "summary": Summarize(j), "submitted_by": j.SubmittedBy, "evidence_source": j.EvidenceSource}
+	return map[string]any{"id": j.ID, "tenant": j.Tenant, "kind": j.Request.Kind, "target": j.Request.Target, "status": j.Status, "attempts": j.Attempts, "error": j.Error, "created_at": j.CreatedAt, "finished_at": j.FinishedAt, "summary": Summarize(j), "submitted_by": j.SubmittedBy, "evidence_source": j.EvidenceSource,"policy_digest":j.PolicyDigest}
 }
 func (a *API) failure(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrInvalid) {
+		respond(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, auth.ErrUnauthorized) {
+		respond(w, 403, map[string]string{"error": "insufficient scope"})
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		respond(w, 404, map[string]string{"error": "not found"})
 		return

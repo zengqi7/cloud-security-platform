@@ -25,7 +25,27 @@ func (w Worker) Once(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	scanCtx, cancel := context.WithTimeout(ctx, 150*time.Second)
-	findings, scanErr := w.Scanner.Scan(scanCtx, job.Request)
+	var findings []Finding
+	var scanErr error
+	if scanner, ok := w.Scanner.(ToolScanner); ok {
+		loader, ok := w.Repo.(interface {
+			LoadPolicy(context.Context, string, string) (PolicyBundle, error)
+		})
+		if !ok {
+			scanErr = errors.New("policy repository unavailable")
+		} else {
+			bundle, err := loader.LoadPolicy(scanCtx, job.Tenant, job.PolicyDigest)
+			if err != nil {
+				scanErr = err
+			} else if job.Request.Kind == "manifest" {
+				findings, scanErr = evaluateBundle(scanCtx, scanner.OPA, scanner.WorkDir, bundle, job.Request.Manifest)
+			} else {
+				findings, scanErr = scanner.Scan(scanCtx, job.Request)
+			}
+		}
+	} else {
+		findings, scanErr = w.Scanner.Scan(scanCtx, job.Request)
+	}
 	cancel()
 	finishCtx, finishCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer finishCancel()

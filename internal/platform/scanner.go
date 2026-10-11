@@ -16,7 +16,7 @@ import (
 type Scanner interface {
 	Scan(context.Context, Request) ([]Finding, error)
 }
-type ToolScanner struct{ Trivy, OPA, Policy, CacheDir, WorkDir string }
+type ToolScanner struct{ Trivy, OPA, Policy, Capabilities, CacheDir, WorkDir string }
 type boundedBuffer struct {
 	bytes.Buffer
 	max int
@@ -67,7 +67,12 @@ func (s ToolScanner) Scan(ctx context.Context, r Request) ([]Finding, error) {
 		if err != nil {
 			return nil, err
 		}
-		raw, err := runTool(ctx, rawInput, s.OPA, "eval", "--stdin-input", "--data", s.Policy, "--format=json", "data.cloudguard.findings")
+		args := []string{"eval", "--stdin-input", "--data", s.Policy, "--format=json"}
+		if s.Capabilities != "" {
+			args = append(args, "--capabilities", s.Capabilities)
+		}
+		args = append(args, "data.cloudguard.findings")
+		raw, err := runTool(ctx, rawInput, s.OPA, args...)
 		if err != nil {
 			return nil, err
 		}

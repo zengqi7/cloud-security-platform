@@ -13,6 +13,8 @@ inputs:
   target:
     description: Asset target; image scans should use a digest reference
     required: true
+  policy-digest:
+    description: Published immutable policy digest; omitted selects built-in baseline
   manifest:
     description: Repository-relative Kubernetes YAML/JSON file
   report:
@@ -45,8 +47,10 @@ runs:
         CLOUDGUARD_REPORT: ${{ inputs.report }}
         CLOUDGUARD_SARIF: ${{ inputs.sarif }}
         CLOUDGUARD_TIMEOUT: ${{ inputs.timeout }}
+        CLOUDGUARD_POLICY: ${{ inputs.policy-digest }}
       run: |
         args=(-kind "$CLOUDGUARD_KIND" -target "$CLOUDGUARD_TARGET" -sarif "$CLOUDGUARD_SARIF" -timeout "$CLOUDGUARD_TIMEOUT")
         if [[ -n "$CLOUDGUARD_MANIFEST" ]]; then args+=(-manifest "$CLOUDGUARD_MANIFEST"); fi
         if [[ -n "$CLOUDGUARD_REPORT" ]]; then args+=(-report "$CLOUDGUARD_REPORT"); fi
+        if [[ -n "$CLOUDGUARD_POLICY" ]]; then args+=(-policy-digest "$CLOUDGUARD_POLICY"); fi
         "$RUNNER_TEMP/cloudguard" "${args[@]}"
