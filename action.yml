@@ -1,0 +1,52 @@
+name: CloudGuard release gate
+description: Submit a manifest or digest image scan, wait for fail-closed gate, and save SARIF
+inputs:
+  api-url:
+    description: Reachable HTTPS CloudGuard API URL (loopback HTTP for local/self-hosted demos)
+    required: true
+  token:
+    description: Scoped credential (scans:submit, scans:read; reports:import only for report import)
+    required: true
+  kind:
+    description: manifest, image or trivy_report
+    default: manifest
+  target:
+    description: Asset target; image scans should use a digest reference
+    required: true
+  manifest:
+    description: Repository-relative Kubernetes YAML/JSON file
+  report:
+    description: Trivy report file; unverified clean imports cannot pass
+  sarif:
+    description: Output SARIF path
+    default: cloudguard.sarif
+  timeout:
+    description: Maximum time to wait
+    default: 10m
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v7
+      with:
+        go-version: '1.27.2'
+        cache: false
+    - name: Build CLI
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: go build -trimpath -o "$RUNNER_TEMP/cloudguard" ./cmd/cloudguard
+    - name: Evaluate release gate
+      shell: bash
+      env:
+        CLOUDGUARD_API_URL: ${{ inputs.api-url }}
+        CLOUDGUARD_TOKEN: ${{ inputs.token }}
+        CLOUDGUARD_KIND: ${{ inputs.kind }}
+        CLOUDGUARD_TARGET: ${{ inputs.target }}
+        CLOUDGUARD_MANIFEST: ${{ inputs.manifest }}
+        CLOUDGUARD_REPORT: ${{ inputs.report }}
+        CLOUDGUARD_SARIF: ${{ inputs.sarif }}
+        CLOUDGUARD_TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        args=(-kind "$CLOUDGUARD_KIND" -target "$CLOUDGUARD_TARGET" -sarif "$CLOUDGUARD_SARIF" -timeout "$CLOUDGUARD_TIMEOUT")
+        if [[ -n "$CLOUDGUARD_MANIFEST" ]]; then args+=(-manifest "$CLOUDGUARD_MANIFEST"); fi
+        if [[ -n "$CLOUDGUARD_REPORT" ]]; then args+=(-report "$CLOUDGUARD_REPORT"); fi
+        "$RUNNER_TEMP/cloudguard" "${args[@]}"

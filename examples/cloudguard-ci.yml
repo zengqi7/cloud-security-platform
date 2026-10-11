@@ -1,0 +1,27 @@
+name: CloudGuard gate example
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: zengqi7/cloud-security-platform@REPLACE_WITH_REVIEWED_COMMIT_SHA
+        with:
+          api-url: ${{ vars.CLOUDGUARD_API_URL }}
+          token: ${{ secrets.CLOUDGUARD_TOKEN }}
+          kind: manifest
+          target: release/app
+          manifest: deploy/app.yaml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cloudguard-evidence
+          path: cloudguard.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('cloudguard.sarif') != ''
+        with:
+          sarif_file: cloudguard.sarif

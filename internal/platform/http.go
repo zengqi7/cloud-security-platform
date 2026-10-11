@@ -169,7 +169,7 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 		respond(w, 405, map[string]string{"error": "method not allowed"})
 		return
 	}
-	if len(parts) == 5 && parts[4] != "findings" && parts[4] != "summary" {
+	if len(parts) == 5 && parts[4] != "findings" && parts[4] != "summary" && parts[4] != "sarif" {
 		respond(w, 404, map[string]string{"error": "not found"})
 		return
 	}
@@ -180,6 +180,34 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 4 {
 		respond(w, 200, jobOverview(job))
+		return
+	}
+	if parts[4] == "sarif" {
+		if job.Status != "succeeded" && job.Status != "failed" {
+			respond(w, 409, map[string]string{"error": "scan not finished"})
+			return
+		}
+		findings := job.Findings
+		if repo, ok := a.Repo.(FindingRepository); ok {
+			findings = []Finding{}
+			for offset := 0; ; {
+				page, total, err := repo.Findings(r.Context(), tenant, job.ID, "", offset, 100)
+				if err != nil {
+					a.failure(w, err)
+					return
+				}
+				findings = append(findings, page...)
+				offset += len(page)
+				if offset >= total {
+					break
+				}
+				if len(page) == 0 {
+					respond(w, 500, map[string]string{"error": "incomplete findings export"})
+					return
+				}
+			}
+		}
+		respond(w, 200, SARIF(job, findings))
 		return
 	}
 	if parts[4] == "summary" {

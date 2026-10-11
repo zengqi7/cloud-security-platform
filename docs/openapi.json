@@ -7,6 +7,14 @@
     "x-contract": "See docs/contracts.md for compatibility and delivery guarantees."
   },
   "paths": {
+    "/api/v1/scans/{id}/sarif": {
+      "get": {
+        "description": "SARIF 2.1.0 all findings; logical locations without fabricated source lines. Requires scans:read.",
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string","pattern":"^[a-f0-9]{32}$"}}],
+        "security": [{"bearer":[]}],
+        "responses": {"200":{"description":"SARIF JSON"},"409":{"description":"Scan unfinished"},"404":{"description":"Not found"},"503":{"description":"Storage unavailable"}}
+      }
+    },
     "/healthz": {
       "get": {
         "responses": {
