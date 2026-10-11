@@ -135,6 +135,22 @@ func TestExpiredFinalAttemptCommitsWithoutNextJob(t *testing.T) {
 		t.Fatalf("terminal update rolled back: %+v %v", ended, err)
 	}
 }
+
+func TestNewerSchemaRefusesOldBinary(t *testing.T) {
+	db := isolatedDB(t)
+	db.SetMaxOpenConns(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := migration.Apply(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO schema_migrations(name,checksum,dirty) VALUES('sql/999999_future.sql',REPEAT('0',64),FALSE)`); err != nil {
+		t.Fatal(err)
+	}
+	if migration.Verify(ctx, db) == nil || migration.Apply(ctx, db) == nil {
+		t.Fatal("newer schema accepted")
+	}
+}
 func TestExpiredUnreclaimedLeaseCannotSettle(t *testing.T) {
 	db := isolatedDB(t)
 	ctx := context.Background()

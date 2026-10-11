@@ -21,7 +21,7 @@ func main() {
 	defer store.DB.Close()
 	data := os.Getenv("SCAN_DATA_DIR")
 	if data == "" {
-		data = "E:/cloud-security-platform/data"
+		data = "data"
 	}
 	scanner, err := platform.NewToolScanner(data)
 	if err != nil {

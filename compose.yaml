@@ -38,6 +38,7 @@ services:
     entrypoint: ["/usr/local/bin/migrate"]
     environment:
       <<: *app-environment
+      MYSQL_DSN: "root:${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}@tcp(mysql:3306)/cloud_security?parseTime=true&charset=utf8mb4&loc=UTC"
     depends_on:
       mysql:
         condition: service_healthy

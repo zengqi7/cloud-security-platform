@@ -1,7 +1,8 @@
 param(
  [string]$BaseUrl = 'http://127.0.0.1:8082',
  [string]$Token = $env:SCAN_TOKEN,
- [switch]$RealImageScan
+ [switch]$RealImageScan,
+ [string]$ImageTarget = 'alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6'
 )
 $ErrorActionPreference = 'Stop'
 if (-not $Token) { throw 'Set SCAN_TOKEN to a database API key with scans:read,scans:submit' }
@@ -12,7 +13,7 @@ $body = @{
  target='checkout-api/staging'
  manifest=(Get-Content -Raw -LiteralPath (Join-Path $root 'examples/unsafe-deployment.json') | ConvertFrom-Json)
 }
-if($RealImageScan){$body=@{kind='image';target='alpine:3.22'}}
+if($RealImageScan){$body=@{kind='image';target=$ImageTarget}}
 $json = $body | ConvertTo-Json -Depth 30
 $job = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/scans" -Headers $headers -ContentType 'application/json' -Body $json
 $reused = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/scans" -Headers $headers -ContentType 'application/json' -Body $json

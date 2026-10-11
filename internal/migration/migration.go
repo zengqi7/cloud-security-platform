@@ -38,6 +38,9 @@ func Apply(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	if err := rejectUnknown(ctx, conn, names); err != nil {
+		return err
+	}
 	for _, name := range names {
 		raw, err := scripts.ReadFile(name)
 		if err != nil {
@@ -106,5 +109,31 @@ func Verify(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migration %s dirty or mismatched", name)
 		}
 	}
-	return nil
+	return rejectUnknown(ctx, db, names)
+}
+
+type queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func rejectUnknown(ctx context.Context, db queryer, names []string) error {
+	known := make(map[string]bool, len(names))
+	for _, name := range names {
+		known[name] = true
+	}
+	rows, err := db.QueryContext(ctx, `SELECT name FROM schema_migrations`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if !known[name] {
+			return fmt.Errorf("database has unknown newer migration %s; do not downgrade binary", name)
+		}
+	}
+	return rows.Err()
 }

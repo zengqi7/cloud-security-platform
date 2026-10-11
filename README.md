@@ -2,113 +2,53 @@
 
 [![CI](https://github.com/zengqi7/cloud-security-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/zengqi7/cloud-security-platform/actions/workflows/ci.yml)
 
-面向研发发布流水线的多租户云原生安全检查服务。调用方提交容器镜像或 Kubernetes workload，平台异步执行 Trivy 漏洞扫描与 OPA 基线检查，统一归一化风险、生成发布门禁结论，并保留可查询的任务状态和结果。
+面向研发流水线的多租户发布门禁与风险治理平台。CI 在部署前提交固定镜像摘要和 Kubernetes workload，平台执行真实扫描并保留证据；发布者读取当前有效门禁评估，安全负责人可进行有期限的双人豁免。
 
-## 应用场景
+## 已实现能力
 
-某团队每天发布多个微服务。CI 在部署前提交镜像地址和 Kubernetes workload：
-
-1. API 根据 Bearer token 确定租户，并用 `Idempotency-Key` 防止流水线重试重复建单。
-2. Worker 使用带租约的 MySQL 队列领取任务，崩溃后可重试接管。
-3. 镜像任务调用 Trivy；manifest 任务调用 OPA Rego。
-4. 平台把不同工具的输出归一为统一 finding，按指纹去重。
-5. `HIGH` 或 `CRITICAL` 风险返回 `block`，无高危风险返回 `pass`；扫描失败返回 `error`，绝不误放行。
-
-## 能力
-
-- API token 到租户的隔离映射，数据库查询强制附带 tenant。
-- 幂等键与请求哈希，重复请求复用任务，键冲突返回 `409`。
-- 异步任务状态 `queued -> running -> succeeded/failed`。
-- 180 秒租约、最多 3 次尝试、过期接管与 fencing token。
-- Trivy SchemaVersion 2 结果解析、严重级归一和 finding 指纹去重。
-- OPA 1.x Rego 基线：特权容器、权限提升、非 root、只读根文件系统、hostNetwork、资源限制、可变镜像标签。
-- 门禁摘要、严重级筛选、分页、健康检查与基础 Prometheus 指标。
-- 请求体、工具输出、执行时间和外部进程 stderr 均有限制。
+- MySQL 队列、幂等请求、租约/fencing、三次尝试、关系化 finding 分页和 SQL 迁移。
+- API Key tenant/subject/scopes、到期/吊销与审计；不信任客户端 tenant。
+- Trivy 0.75.0 镜像漏洞扫描及 CycloneDX SBOM；OPA 1.21.1 受限能力策略执行。
+- 不可变策略 bundle/version/digest、扫描策略快照；未知风险、工具失败、缺失或过期证据均 fail-closed。
+- 独立 immutable assessment，最长 15 分钟且受 DB/waiver 到期限制；特定 scan/fingerprint 的 TTL waiver，申请者不能自批，finding 不变。
+- asset/scan series、严格可比差异；不同镜像摘要的缺失风险只能称 possibly_fixed。SBOM 取出时校验摘要。
+- 可选 Cosign 3.1.3 精确身份/公钥验签和 SLSA v1 builder/subject 检查；默认 disabled，不宣称真实性。
+- Trivy DB UpdatedAt 48 小时新鲜度检查；持久重扫固定 artifact，创建凭证吊销或到期后关闭调度。
+- CLI、SARIF 2.1.0、GitHub composite Action；退出码 0/pass、2/block、3/error。
 
 ## 快速启动
 
-要求 Docker Compose v2。先配置随机数据库密码，启动后签发短期 API Key：
+需要 Docker Compose v2。复制模板后设置随机数据库密码：
 
 ```powershell
 Copy-Item .env.example .env
 docker compose up --build -d
-docker compose ps
-docker compose run --rm --entrypoint key api -tenant acme -subject ci-checkout -scopes scans:read,scans:submit -ttl 24h
-```
-
-默认 API：`http://127.0.0.1:8082`。Compose 镜像内固定包含 Trivy 0.75.0 和 OPA 1.21.1。
-
-提交 Kubernetes 基线扫描：
-
-```powershell
-$token = 'replace-with-your-token'
-$manifest = Get-Content .\examples\unsafe-deployment.json -Raw | ConvertFrom-Json
-$body = @{kind='manifest'; target='checkout-api/staging'; manifest=$manifest} | ConvertTo-Json -Depth 30
-$headers = @{Authorization="Bearer $token"; 'Idempotency-Key'='release-20261010-42'}
-$job = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8082/api/v1/scans -Headers $headers -ContentType application/json -Body $body
-Invoke-RestMethod -Uri "http://127.0.0.1:8082/api/v1/scans/$($job.id)/summary" -Headers $headers
-```
-
-执行完整 smoke test：
-
-```powershell
-$env:SCAN_TOKEN='replace-with-your-token'
+$key = docker compose run --rm --no-deps --entrypoint key api -tenant acme -subject local-ci -scopes scans:read,scans:submit,assessments:write -ttl 24h | ConvertFrom-Json
+$env:SCAN_TOKEN = $key.token
 .\scripts\smoke-test.ps1
 ```
 
-使用 `-RealImageScan` 可扫描 `alpine:3.22`，首次运行会下载漏洞数据库并需要外网。
+API：http://127.0.0.1:8082。smoke 验证危险 Deployment 被 block；`-RealImageScan` 扫描固定 Alpine 摘要，首次下载 DB 需网络。默认 Compose 不要求签名；启用 keyless/只读公钥见 [supply-chain](docs/supply-chain.md)。
 
-## API
+## CI 和开发
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/api/v1/scans` | 提交 image、manifest 或受信任的 Trivy report |
-| `GET` | `/api/v1/scans` | 查询当前租户最近任务 |
-| `GET` | `/api/v1/scans/{id}` | 查询任务状态 |
-| `GET` | `/api/v1/scans/{id}/summary` | 获取门禁结论 |
-| `GET` | `/api/v1/scans/{id}/findings` | 按 severity 分页查询风险 |
-| `GET` | `/healthz`, `/readyz`, `/metrics` | 健康、依赖和指标 |
+生产客户端使用 HTTPS，令牌通过 CI Secret 环境变量注入：
 
-所有 `/api/` 请求必须携带 `Authorization: Bearer <token>`。提交接口建议携带最多 128 字节的 `Idempotency-Key`。
-
-### 请求类型
-
-- `image`：`target` 为镜像引用，Worker 从远端 registry 拉取元数据并由 Trivy 扫描。
-- `manifest`：`manifest` 为 Kubernetes JSON 对象，支持 Pod、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job 和 CronJob。
-- `trivy_report`：导入 Trivy JSON，用于受信任 CI 或隔离环境。V1 不验证报告签名，不应将不可信客户端上传的报告当作供应链证明。
-
-## 本地开发
-
-下载安装并校验 Windows 版工具到项目 `tools` 目录：
-
-```powershell
-.\scripts\install-tools.ps1
-$env:OPA_BIN=(Resolve-Path .\tools\opa.exe)
-.\scripts\test.ps1
+```sh
+export CLOUDGUARD_API_URL=https://scanner.example
+# CLOUDGUARD_TOKEN is injected by the CI secret store.
+cloudguard -kind image -target registry.example/app@sha256:REPLACE_WITH_DIGEST -asset checkout -series production -assess -sarif cloudguard.sarif
 ```
 
-启动 MySQL 后，可分别运行：
+镜像必须固定摘要才能产生可信门禁证据。CI 不能以 continue-on-error 绕过门禁。完整路径和权限见 [OpenAPI](docs/openapi.json)。
 
-```powershell
-$env:MYSQL_DSN='cloud_app:password@tcp(127.0.0.1:3307)/cloud_security?parseTime=true&charset=utf8mb4&loc=UTC'
-go run ./cmd/migrate
-go run ./cmd/key -tenant acme -subject developer -scopes scans:read,scans:submit -ttl 24h
-go run ./cmd/server
-go run ./cmd/worker
-```
+Go 版本以 go.mod 为准，使用 database/sql。容器附带工具；本地需设置 OPA_BIN、TRIVY_BIN、COSIGN_BIN 为匹配 OS 的可信程序。Windows scripts/install-tools.ps1 安装校验后的 OPA/Trivy，Cosign 需另行核对官方校验和。先 cmd/migrate，后 cmd/server 与 cmd/worker。测试：`go test ./...`、`go vet ./...`；真实 OPA 设置 OPA_BIN；独立 MySQL 设置 INTEGRATION_MYSQL_DSN 后运行 `go test -race -tags=integration ./...`。
 
-## 安全边界
+## 边界与运维
 
-- API Key 由数据库管理主体、权限、有效期和吊销，原文仅签发时输出；详见 docs/authentication.md。旧 SCAN_API_TOKENS 不再使用。
-- API 默认仅绑定本机，公开部署必须置于 TLS 反向代理之后。
-- Trivy 只启用漏洞扫描并限制为 remote image source；不把客户端输入交给 shell。
-- OPA 仅加载部署时固定的策略路径。
-- `pass` 只说明当前 V1 策略下没有 HIGH/CRITICAL finding，不等价于镜像或集群绝对安全。
-- 漏洞数据库具有时效性，生产环境需监控更新时间并定期重扫。
+pass 仅代表策略与证据范围内通过，不证明没有漏洞。无集群自动发现、自动部署、管理 UI、SSO、自动 retention；重扫不追踪可变标签。签名成功输出只存摘要，未归档完整证书，不宣称 SLSA 等级。业务 assessment 与本仓库构建 provenance 是不同证据。上线需要 TLS、出口网络控制、Secret、告警、备份恢复和容量验证。
 
-## 测试与 CI
-
-- 单元测试覆盖 Trivy 解析、去重、门禁、manifest 解析、认证、租户隔离和 Worker 失败语义。
-- OPA 集成测试使用真实 OPA 二进制验证危险/安全 workload。
-- MySQL 集成测试覆盖任务幂等、冲突、租户隔离、领取、完成和过期 lease 拒绝。
-- GitHub Actions 执行 `go test -race`、`go vet`、真实 OPA 测试、MySQL 集成测试和容器构建。
+- [架构](docs/architecture.md) / [认证](docs/authentication.md) / [CI 集成](docs/ci-integration.md)
+- [策略](docs/policy-bundles.md) / [评估与豁免](docs/gate-assessments.md) / [风险生命周期](docs/risk-lifecycle.md)
+- [供应链与重扫](docs/supply-chain.md) / [存储升级](docs/storage-upgrades.md)
+- [发布、升级、恢复与兼容政策](docs/release-and-operations.md)

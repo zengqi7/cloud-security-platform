@@ -10,7 +10,7 @@
 
 ## Migration and compatibility
 
-The baseline creates scan_jobs at startup. C1 replaces this with checksum-verified, locked migrations and normalized findings. Existing JSON findings must backfill without loss before any legacy removal. MySQL DDL is nontransactional: restore a backup to test upgrades, reconcile partial DDL explicitly, and never blindly replay a changed migration. Schema expansion precedes code upgrade; destructive contraction is a later release.
+Separate checksum-verified, locked migrations manage scan_jobs and normalized findings; service startup never executes DDL. Legacy JSON findings backfill before removal. Dirty or unknown newer migrations block startup. MySQL DDL is nontransactional: restore a backup to test upgrades, reconcile partial DDL explicitly, and never blindly replay a changed migration. Schema expansion precedes code upgrade; destructive contraction is a later release.
 
 OpenAPI 3.1 is stored in docs/openapi.json. Responses may gain additive fields within v1. Auth/scanner trust changes require documented upgrade steps. Scan series may only compare successful complete evidence with the same asset and comparable scope; absence from a failed scan is not a fix.
 
