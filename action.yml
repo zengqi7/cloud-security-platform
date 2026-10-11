@@ -15,6 +15,10 @@ inputs:
     required: true
   policy-digest:
     description: Published immutable policy digest; omitted selects built-in baseline
+  asset:
+    description: Stable logical asset identity across artifact digests
+  series:
+    description: Scan series within asset (requires asset); default is default
   assess:
     description: Use point-in-time assessment with approved waivers (requires assessments:write)
     default: 'false'
@@ -52,10 +56,14 @@ runs:
         CLOUDGUARD_TIMEOUT: ${{ inputs.timeout }}
         CLOUDGUARD_POLICY: ${{ inputs.policy-digest }}
         CLOUDGUARD_ASSESS: ${{ inputs.assess }}
+        CLOUDGUARD_ASSET: ${{ inputs.asset }}
+        CLOUDGUARD_SERIES: ${{ inputs.series }}
       run: |
         args=(-kind "$CLOUDGUARD_KIND" -target "$CLOUDGUARD_TARGET" -sarif "$CLOUDGUARD_SARIF" -timeout "$CLOUDGUARD_TIMEOUT")
         if [[ -n "$CLOUDGUARD_MANIFEST" ]]; then args+=(-manifest "$CLOUDGUARD_MANIFEST"); fi
         if [[ -n "$CLOUDGUARD_REPORT" ]]; then args+=(-report "$CLOUDGUARD_REPORT"); fi
         if [[ -n "$CLOUDGUARD_POLICY" ]]; then args+=(-policy-digest "$CLOUDGUARD_POLICY"); fi
+        if [[ -n "$CLOUDGUARD_ASSET" ]]; then args+=(-asset "$CLOUDGUARD_ASSET"); fi
+        if [[ -n "$CLOUDGUARD_SERIES" ]]; then args+=(-series "$CLOUDGUARD_SERIES"); fi
         if [[ "$CLOUDGUARD_ASSESS" == 'true' ]]; then args+=(-assess); fi
         "$RUNNER_TEMP/cloudguard" "${args[@]}"

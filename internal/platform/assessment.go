@@ -33,16 +33,17 @@ type WaiverDecision struct {
 	Reason string `json:"reason"`
 }
 type Assessment struct {
-	ID             string    `json:"id"`
-	ScanID         string    `json:"scan_id"`
-	PolicyDigest   string    `json:"policy_digest"`
-	EvidenceSource string    `json:"evidence_source"`
-	EvaluatedAt    time.Time `json:"evaluated_at"`
-	ValidUntil     time.Time `json:"valid_until"`
-	Subject        string    `json:"subject"`
-	Original       Summary   `json:"original"`
-	Effective      Summary   `json:"effective"`
-	AppliedWaivers []Waiver  `json:"applied_waivers"`
+	Evidence       *ScanEvidence `json:"evidence,omitempty"`
+	ID             string        `json:"id"`
+	ScanID         string        `json:"scan_id"`
+	PolicyDigest   string        `json:"policy_digest"`
+	EvidenceSource string        `json:"evidence_source"`
+	EvaluatedAt    time.Time     `json:"evaluated_at"`
+	ValidUntil     time.Time     `json:"valid_until"`
+	Subject        string        `json:"subject"`
+	Original       Summary       `json:"original"`
+	Effective      Summary       `json:"effective"`
+	AppliedWaivers []Waiver      `json:"applied_waivers"`
 }
 
 func governancePrincipal(ctx context.Context, scope string) (auth.Principal, error) {
@@ -220,7 +221,7 @@ func (s Store) Assess(ctx context.Context, id, key string) (Assessment, error) {
 			return Assessment{}, errors.New("policy digest mismatch")
 		}
 	}
-	a := Assessment{ID: NewID(), ScanID: id, PolicyDigest: job.PolicyDigest, EvidenceSource: job.EvidenceSource, Subject: p.Subject, EvaluatedAt: now, ValidUntil: now.Add(15 * time.Minute), Original: Summarize(job), AppliedWaivers: []Waiver{}}
+	a := Assessment{ID: NewID(), ScanID: id, PolicyDigest: job.PolicyDigest, EvidenceSource: job.EvidenceSource, Evidence: job.Evidence, Subject: p.Subject, EvaluatedAt: now, ValidUntil: now.Add(15 * time.Minute), Original: Summarize(job), AppliedWaivers: []Waiver{}}
 	a.Effective = Summary{Counts: map[string]int{}, Gate: a.Original.Gate, Reason: a.Original.Reason}
 	for severity, count := range a.Original.Counts {
 		a.Effective.Counts[severity] = count

@@ -184,7 +184,7 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 		respond(w, 405, map[string]string{"error": "method not allowed"})
 		return
 	}
-	if len(parts) == 5 && parts[4] != "findings" && parts[4] != "summary" && parts[4] != "sarif" {
+	if len(parts) == 5 && parts[4] != "findings" && parts[4] != "summary" && parts[4] != "sarif" && parts[4] != "diff" && parts[4] != "sbom" {
 		respond(w, 404, map[string]string{"error": "not found"})
 		return
 	}
@@ -195,6 +195,43 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 4 {
 		respond(w, 200, jobOverview(job))
+		return
+	}
+	if parts[4] == "diff" {
+		base := r.URL.Query().Get("base")
+		if !scanID.MatchString(base) {
+			respond(w, 400, map[string]string{"error": "base scan ID required"})
+			return
+		}
+		repo, ok := a.Repo.(interface {
+			Diff(context.Context, string, string, string) (RiskDiff, error)
+		})
+		if !ok {
+			respond(w, 503, map[string]string{"error": "diff storage unavailable"})
+			return
+		}
+		result, err := repo.Diff(r.Context(), tenant, base, job.ID)
+		if err != nil {
+			a.failure(w, err)
+			return
+		}
+		respond(w, 200, result)
+		return
+	}
+	if parts[4] == "sbom" {
+		repo, ok := a.Repo.(interface {
+			SBOM(context.Context, string, string) (json.RawMessage, error)
+		})
+		if !ok {
+			respond(w, 503, map[string]string{"error": "SBOM storage unavailable"})
+			return
+		}
+		result, err := repo.SBOM(r.Context(), tenant, job.ID)
+		if err != nil {
+			a.failure(w, err)
+			return
+		}
+		respond(w, 200, result)
 		return
 	}
 	if parts[4] == "sarif" {
@@ -273,7 +310,7 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"items": filtered[offset:end], "total": total, "offset": offset, "limit": limit})
 }
 func jobOverview(j Job) map[string]any {
-	return map[string]any{"id": j.ID, "tenant": j.Tenant, "kind": j.Request.Kind, "target": j.Request.Target, "status": j.Status, "attempts": j.Attempts, "error": j.Error, "created_at": j.CreatedAt, "finished_at": j.FinishedAt, "summary": Summarize(j), "submitted_by": j.SubmittedBy, "evidence_source": j.EvidenceSource, "policy_digest": j.PolicyDigest}
+	return map[string]any{"id": j.ID, "tenant": j.Tenant, "kind": j.Request.Kind, "target": j.Request.Target, "status": j.Status, "attempts": j.Attempts, "error": j.Error, "created_at": j.CreatedAt, "finished_at": j.FinishedAt, "summary": Summarize(j), "submitted_by": j.SubmittedBy, "evidence_source": j.EvidenceSource, "policy_digest": j.PolicyDigest, "asset_id": j.AssetID, "series_id": j.SeriesID, "scope_hash": j.ScopeHash, "evidence": j.Evidence}
 }
 func (a *API) failure(w http.ResponseWriter, err error) {
 	if errors.Is(err, ErrState) {
