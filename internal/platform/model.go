@@ -16,25 +16,28 @@ var ErrConflict = errors.New("idempotency key reused with different request")
 var ErrLeaseLost = errors.New("scan lease lost")
 
 type Request struct {
-	Kind     string          `json:"kind"`
-	Target   string          `json:"target"`
-	Manifest json.RawMessage `json:"manifest,omitempty"`
-	Report   json.RawMessage `json:"report,omitempty"`
+	PolicyDigest string          `json:"policy_digest,omitempty"`
+	Kind         string          `json:"kind"`
+	Target       string          `json:"target"`
+	Manifest     json.RawMessage `json:"manifest,omitempty"`
+	Report       json.RawMessage `json:"report,omitempty"`
 }
 type Job struct {
-	ID             string     `json:"id"`
-	Tenant         string     `json:"tenant"`
-	Status         string     `json:"status"`
-	Request        Request    `json:"request"`
-	Attempts       int        `json:"attempts"`
-	Error          string     `json:"error,omitempty"`
-	Findings       []Finding  `json:"findings"`
-	CreatedAt      time.Time  `json:"created_at"`
-	FinishedAt     *time.Time `json:"finished_at,omitempty"`
-	LeaseToken     string     `json:"-"`
-	StoredSummary  *Summary   `json:"-"`
-	SubmittedBy    string     `json:"submitted_by"`
-	EvidenceSource string     `json:"evidence_source"`
+	PolicyDigest   string        `json:"policy_digest"`
+	Policy         *PolicyBundle `json:"-"`
+	ID             string        `json:"id"`
+	Tenant         string        `json:"tenant"`
+	Status         string        `json:"status"`
+	Request        Request       `json:"request"`
+	Attempts       int           `json:"attempts"`
+	Error          string        `json:"error,omitempty"`
+	Findings       []Finding     `json:"findings"`
+	CreatedAt      time.Time     `json:"created_at"`
+	FinishedAt     *time.Time    `json:"finished_at,omitempty"`
+	LeaseToken     string        `json:"-"`
+	StoredSummary  *Summary      `json:"-"`
+	SubmittedBy    string        `json:"submitted_by"`
+	EvidenceSource string        `json:"evidence_source"`
 }
 type Finding struct {
 	Fingerprint      string `json:"fingerprint"`
@@ -83,12 +86,32 @@ func Summarize(job Job) Summary {
 			s.Reason = "imported report is not independently verified release evidence"
 		}
 	}
+	if job.Status == "succeeded" {
+		if job.Policy != nil && s.Gate != "error" {
+			s.Gate = "pass"
+			s.Reason = "no blocking findings under policy " + job.Policy.Version
+			for _, severity := range job.Policy.BlockSeverities {
+				if s.Counts[severity] > 0 {
+					s.Gate = "block"
+					s.Reason = "blocking findings under policy " + job.Policy.Version
+					break
+				}
+			}
+		}
+		if job.PolicyDigest != "" && job.Policy == nil {
+			s.Gate = "error"
+			s.Reason = "policy snapshot unavailable; no release approval"
+		}
+	}
 	return s
 }
 
 var imagePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$`)
 
 func Validate(r Request) error {
+	if r.PolicyDigest != "" && !digestPattern.MatchString(r.PolicyDigest) {
+		return errors.New("invalid policy digest")
+	}
 	if len(r.Target) == 0 || len(r.Target) > 255 {
 		return errors.New("target must contain 1 to 255 bytes")
 	}

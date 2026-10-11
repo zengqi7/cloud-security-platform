@@ -52,7 +52,23 @@ func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, 
 		return Job{}, false, err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO scan_jobs(id,tenant,idempotency_key,request_hash,request_json,findings_json,submitted_by,evidence_source) VALUES(?,?,?,?,?,JSON_ARRAY(),?,?)`, id, tenant, key, RequestHash(r), raw, subject, source)
+	policyDigest := r.PolicyDigest
+	if policyDigest == "" {
+		bundle := DefaultPolicy()
+		policyDigest = bundle.Digest()
+		encoded, _ := json.Marshal(bundle)
+		if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO policy_bundles(tenant,digest,version,bundle_json,published_by) VALUES(?,?,?,?, 'builtin')`, tenant, policyDigest, bundle.Version, encoded); err != nil {
+			return Job{}, false, err
+		}
+	}
+	var policyCount int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM policy_bundles WHERE tenant=? AND digest=?`, tenant, policyDigest).Scan(&policyCount); err != nil {
+		return Job{}, false, err
+	}
+	if policyCount != 1 {
+		return Job{}, false, ErrNotFound
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO scan_jobs(id,tenant,idempotency_key,request_hash,request_json,findings_json,submitted_by,evidence_source,policy_digest) VALUES(?,?,?,?,?,JSON_ARRAY(),?,?,?)`, id, tenant, key, RequestHash(r), raw, subject, source, policyDigest)
 	if err != nil {
 		tx.Rollback()
 		var duplicate *mysqlerr.MySQLError
@@ -81,14 +97,14 @@ func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, 
 	return job, false, err
 }
 
-const selectJob = `SELECT id,tenant,status,request_json,attempts,COALESCE(error_text,''),summary_json,created_at,finished_at,COALESCE(lease_token,''),submitted_by,evidence_source FROM scan_jobs `
+const selectJob = `SELECT id,tenant,status,request_json,attempts,COALESCE(error_text,''),summary_json,created_at,finished_at,COALESCE(lease_token,''),submitted_by,evidence_source,policy_digest FROM scan_jobs `
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanJob(row rowScanner) (Job, error) {
 	var j Job
 	var request, summary []byte
-	err := row.Scan(&j.ID, &j.Tenant, &j.Status, &request, &j.Attempts, &j.Error, &summary, &j.CreatedAt, &j.FinishedAt, &j.LeaseToken, &j.SubmittedBy, &j.EvidenceSource)
+	err := row.Scan(&j.ID, &j.Tenant, &j.Status, &request, &j.Attempts, &j.Error, &summary, &j.CreatedAt, &j.FinishedAt, &j.LeaseToken, &j.SubmittedBy, &j.EvidenceSource, &j.PolicyDigest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -107,7 +123,18 @@ func scanJob(row rowScanner) (Job, error) {
 	return j, nil
 }
 func (s Store) Get(ctx context.Context, tenant, id string) (Job, error) {
-	return scanJob(s.DB.QueryRowContext(ctx, selectJob+"WHERE tenant=? AND id=?", tenant, id))
+	j, err := scanJob(s.DB.QueryRowContext(ctx, selectJob+"WHERE tenant=? AND id=?", tenant, id))
+	if err != nil {
+		return j, err
+	}
+	if digestPattern.MatchString(j.PolicyDigest) {
+		b, err := s.LoadPolicy(ctx, tenant, j.PolicyDigest)
+		if err != nil {
+			return j, err
+		}
+		j.Policy = &b
+	}
+	return j, nil
 }
 func (s Store) List(ctx context.Context, tenant string, limit int) ([]Job, error) {
 	rows, err := s.DB.QueryContext(ctx, selectJob+"WHERE tenant=? ORDER BY created_at DESC,id DESC LIMIT ?", tenant, limit)
@@ -123,7 +150,20 @@ func (s Store) List(ctx context.Context, tenant string, limit int) ([]Job, error
 		}
 		jobs = append(jobs, j)
 	}
-	return jobs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	for i := range jobs {
+		if digestPattern.MatchString(jobs[i].PolicyDigest) {
+			b, err := s.LoadPolicy(ctx, tenant, jobs[i].PolicyDigest)
+			if err != nil {
+				return nil, err
+			}
+			jobs[i].Policy = &b
+		}
+	}
+	return jobs, nil
 }
 func (s Store) Claim(ctx context.Context) (Job, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)

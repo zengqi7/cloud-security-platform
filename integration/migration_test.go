@@ -89,7 +89,7 @@ func TestLegacyBackfillAndMigrationIntegrity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if platform.Summarize(job).Counts["HIGH"] != 1 || platform.Summarize(job).Gate != "block" {
+	if platform.Summarize(job).Counts["HIGH"] != 1 || platform.Summarize(job).Gate != "error" {
 		t.Fatal("summary backfill", job)
 	}
 	page, total, err := store.Findings(ctx, "legacy", id, "", 1, 1)

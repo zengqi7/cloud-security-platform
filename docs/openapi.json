@@ -7,6 +7,8 @@
     "x-contract": "See docs/contracts.md for compatibility and delivery guarantees."
   },
   "paths": {
+    "/api/v1/policies": {"post":{"description":"Publish full immutable bundle after real OPA tests; policies:publish required.","security":[{"bearer":[]}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["version","rego","block_severities","tests"]}}}},"responses":{"201":{"description":"Version and SHA-256 digest"},"400":{"description":"Invalid or failed policy tests"},"403":{"description":"Missing scope"},"503":{"description":"Storage or tool unavailable"}}}},
+    "/api/v1/policies/{digest}": {"get":{"description":"Read tenant bundle with scans:read.","parameters":[{"name":"digest","in":"path","required":true,"schema":{"type":"string","pattern":"^[a-f0-9]{64}$"}}],"security":[{"bearer":[]}],"responses":{"200":{"description":"Full pinned policy bundle"},"404":{"description":"Not found"}}}},
     "/api/v1/scans/{id}/sarif": {
       "get": {
         "description": "SARIF 2.1.0 all findings; logical locations without fabricated source lines. Requires scans:read.",
