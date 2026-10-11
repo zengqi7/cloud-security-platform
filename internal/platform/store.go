@@ -17,6 +17,31 @@ import (
 
 type Store struct{ DB *sql.DB }
 
+const transactionRetryLimit = 3
+
+func retryTransaction(ctx context.Context, operation func() error) error {
+	var err error
+	for attempt := 0; attempt < transactionRetryLimit; attempt++ {
+		err = operation()
+		if !isRetryableTransactionError(err) || attempt == transactionRetryLimit-1 {
+			return err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 25 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return err
+}
+
+func isRetryableTransactionError(err error) bool {
+	var mysqlError *mysqlerr.MySQLError
+	return errors.As(err, &mysqlError) && (mysqlError.Number == 1205 || mysqlError.Number == 1213)
+}
+
 func NewID() string {
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
@@ -188,16 +213,39 @@ func (s Store) List(ctx context.Context, tenant string, limit int) ([]Job, error
 	return jobs, nil
 }
 func (s Store) Claim(ctx context.Context) (Job, error) {
+	if err := retryTransaction(ctx, func() error { return s.expireCrashedJob(ctx) }); err != nil {
+		return Job{}, err
+	}
+	var job Job
+	err := retryTransaction(ctx, func() error {
+		var err error
+		job, err = s.claimOnce(ctx)
+		return err
+	})
+	return job, err
+}
+
+func (s Store) expireCrashedJob(ctx context.Context) error {
+	var jobID string
+	err := s.DB.QueryRowContext(ctx, `SELECT id FROM scan_jobs WHERE status='running' AND lease_until<=UTC_TIMESTAMP(3) AND attempts>=3 ORDER BY id LIMIT 1`).Scan(&jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	// Update through the primary key so lease cleanup and settlement use the
+	// same lock order. Recheck eligibility because the initial read is unlocked.
+	_, err = s.DB.ExecContext(ctx, `UPDATE scan_jobs SET status='failed',error_text='worker lease expired after maximum attempts',finished_at=UTC_TIMESTAMP(3),lease_token=NULL,lease_until=NULL WHERE id=? AND status='running' AND lease_until<=UTC_TIMESTAMP(3) AND attempts>=3`, jobID)
+	return err
+}
+
+func (s Store) claimOnce(ctx context.Context) (Job, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Job{}, err
 	}
 	defer tx.Rollback()
-	// Terminate jobs that repeatedly crash while holding a lease.
-	_, err = tx.ExecContext(ctx, `UPDATE scan_jobs SET status='failed',error_text='worker lease expired after maximum attempts',finished_at=UTC_TIMESTAMP(3),lease_token=NULL,lease_until=NULL WHERE status='running' AND lease_until<=UTC_TIMESTAMP(3) AND attempts>=3`)
-	if err != nil {
-		return Job{}, err
-	}
 	// Lock only the candidate ID so MySQL never carries large JSON/TEXT values
 	// through the queue-order filesort. Read the full row after the lock is held.
 	var jobID string
@@ -249,11 +297,6 @@ func (s Store) FinishEvidence(ctx context.Context, job Job, result ScanResult, s
 	if err != nil {
 		return err
 	}
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	evidence, err := json.Marshal(result.Evidence)
 	if err != nil {
 		return err
@@ -262,6 +305,17 @@ func (s Store) FinishEvidence(ctx context.Context, job Job, result ScanResult, s
 	if len(result.SBOM) > 0 {
 		sbom = []byte(result.SBOM)
 	}
+	return retryTransaction(ctx, func() error {
+		return s.finishEvidenceOnce(ctx, job, status, message, raw, evidence, sbom, findings, scanErr)
+	})
+}
+
+func (s Store) finishEvidenceOnce(ctx context.Context, job Job, status, message string, raw, evidence []byte, sbom any, findings []Finding, scanErr error) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	settled, err := tx.ExecContext(ctx, `UPDATE scan_jobs SET status=?,error_text=?,summary_json=?,evidence_json=?,sbom_json=?,lease_token=NULL,lease_until=NULL,next_attempt_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 15 SECOND),finished_at=IF(?='queued',NULL,UTC_TIMESTAMP(3)) WHERE id=? AND tenant=? AND status='running' AND lease_token=? AND lease_until>UTC_TIMESTAMP(3)`, status, message, raw, evidence, sbom, status, job.ID, job.Tenant, job.LeaseToken)
 	if err != nil {
 		return err
