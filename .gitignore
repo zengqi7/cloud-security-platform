@@ -3,3 +3,6 @@ tools/
 *.exe
 .env
 dist/
+results/capacity/
+__pycache__/
+*.pyc
