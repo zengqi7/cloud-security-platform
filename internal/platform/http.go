@@ -78,6 +78,15 @@ func (a *API) auth(next http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/v1/policies") && r.Method != http.MethodGet {
 			scope = "policies:publish"
 		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/waivers" {
+			scope = "waivers:request"
+		}
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/waivers/") {
+			scope = "waivers:approve"
+		}
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/assessments") {
+			scope = "assessments:write"
+		}
 		if !p.Allows(scope) {
 			respond(w, 403, map[string]string{"error": "insufficient scope"})
 			return
@@ -264,9 +273,13 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"items": filtered[offset:end], "total": total, "offset": offset, "limit": limit})
 }
 func jobOverview(j Job) map[string]any {
-	return map[string]any{"id": j.ID, "tenant": j.Tenant, "kind": j.Request.Kind, "target": j.Request.Target, "status": j.Status, "attempts": j.Attempts, "error": j.Error, "created_at": j.CreatedAt, "finished_at": j.FinishedAt, "summary": Summarize(j), "submitted_by": j.SubmittedBy, "evidence_source": j.EvidenceSource,"policy_digest":j.PolicyDigest}
+	return map[string]any{"id": j.ID, "tenant": j.Tenant, "kind": j.Request.Kind, "target": j.Request.Target, "status": j.Status, "attempts": j.Attempts, "error": j.Error, "created_at": j.CreatedAt, "finished_at": j.FinishedAt, "summary": Summarize(j), "submitted_by": j.SubmittedBy, "evidence_source": j.EvidenceSource, "policy_digest": j.PolicyDigest}
 }
 func (a *API) failure(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrState) {
+		respond(w, 409, map[string]string{"error": err.Error()})
+		return
+	}
 	if errors.Is(err, ErrInvalid) {
 		respond(w, 400, map[string]string{"error": err.Error()})
 		return
