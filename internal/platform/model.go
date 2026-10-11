@@ -22,16 +22,17 @@ type Request struct {
 	Report   json.RawMessage `json:"report,omitempty"`
 }
 type Job struct {
-	ID         string     `json:"id"`
-	Tenant     string     `json:"tenant"`
-	Status     string     `json:"status"`
-	Request    Request    `json:"request"`
-	Attempts   int        `json:"attempts"`
-	Error      string     `json:"error,omitempty"`
-	Findings   []Finding  `json:"findings"`
-	CreatedAt  time.Time  `json:"created_at"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	LeaseToken string     `json:"-"`
+	ID            string     `json:"id"`
+	Tenant        string     `json:"tenant"`
+	Status        string     `json:"status"`
+	Request       Request    `json:"request"`
+	Attempts      int        `json:"attempts"`
+	Error         string     `json:"error,omitempty"`
+	Findings      []Finding  `json:"findings"`
+	CreatedAt     time.Time  `json:"created_at"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	LeaseToken    string     `json:"-"`
+	StoredSummary *Summary   `json:"-"`
 }
 type Finding struct {
 	Fingerprint      string `json:"fingerprint"`
@@ -52,6 +53,11 @@ type Summary struct {
 
 func Summarize(job Job) Summary {
 	s := Summary{Counts: map[string]int{"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}, Gate: "pending", Reason: "scan has not completed successfully"}
+	if job.StoredSummary != nil {
+		for severity, count := range job.StoredSummary.Counts {
+			s.Counts[severity] = count
+		}
+	}
 	for _, f := range job.Findings {
 		s.Counts[f.Severity]++
 	}
@@ -65,6 +71,10 @@ func Summarize(job Job) Summary {
 		if s.Counts["HIGH"]+s.Counts["CRITICAL"] > 0 {
 			s.Gate = "block"
 			s.Reason = "HIGH or CRITICAL findings require remediation"
+		}
+		if s.Counts["UNKNOWN"] > 0 {
+			s.Gate = "error"
+			s.Reason = "unknown finding severity; no release approval"
 		}
 	}
 	return s
