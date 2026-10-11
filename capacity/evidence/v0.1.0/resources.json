@@ -1,0 +1,52 @@
+{
+  "groups": {
+    "normal": {
+      "api": {
+        "cpu_median_percent": 3.87,
+        "cpu_peak_percent": 17.71,
+        "memory_median_mib": 12.885,
+        "memory_peak_mib": 20.13,
+        "samples": 114
+      },
+      "mysql": {
+        "cpu_median_percent": 9.440000000000001,
+        "cpu_peak_percent": 23.63,
+        "memory_median_mib": 468.65,
+        "memory_peak_mib": 497.6,
+        "samples": 114
+      },
+      "worker": {
+        "cpu_median_percent": 0.47,
+        "cpu_peak_percent": 100.74,
+        "memory_median_mib": 10.23,
+        "memory_peak_mib": 28.57,
+        "samples": 270
+      }
+    },
+    "recovery": {
+      "api": {
+        "cpu_median_percent": 7.45,
+        "cpu_peak_percent": 15.67,
+        "memory_median_mib": 12.2,
+        "memory_peak_mib": 17.27,
+        "samples": 29
+      },
+      "mysql": {
+        "cpu_median_percent": 6.67,
+        "cpu_peak_percent": 17.58,
+        "memory_median_mib": 476.5,
+        "memory_peak_mib": 500.7,
+        "samples": 29
+      },
+      "worker": {
+        "cpu_median_percent": 0.16,
+        "cpu_peak_percent": 67.97,
+        "memory_median_mib": 9.16,
+        "memory_peak_mib": 31.9,
+        "samples": 36
+      }
+    }
+  },
+  "median_method": "statistics.median; workers are per-container samples",
+  "schema_version": 1
+}
