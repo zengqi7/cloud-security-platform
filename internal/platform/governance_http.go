@@ -21,6 +21,9 @@ func decodeGovernance(w http.ResponseWriter, r *http.Request, value any) error {
 	return nil
 }
 func (a *API) governance(w http.ResponseWriter, r *http.Request, tenant string) bool {
+	if a.rescanRoute(w, r, tenant) {
+		return true
+	}
 	if a.assessmentRoute(w, r, tenant) {
 		return true
 	}

@@ -6,20 +6,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 )
 
 type ScanEvidence struct {
-	Tool           string     `json:"tool"`
-	ToolVersion    string     `json:"tool_version"`
-	Profile        string     `json:"profile"`
-	ArtifactDigest string     `json:"artifact_digest"`
-	Complete       bool       `json:"complete"`
-	CapturedAt     time.Time  `json:"captured_at"`
-	SBOMDigest     string     `json:"sbom_digest,omitempty"`
-	DBUpdatedAt    *time.Time `json:"db_updated_at,omitempty"`
+	SupplyChain    *SupplyChainEvidence `json:"supply_chain,omitempty"`
+	Tool           string               `json:"tool"`
+	ToolVersion    string               `json:"tool_version"`
+	Profile        string               `json:"profile"`
+	ArtifactDigest string               `json:"artifact_digest"`
+	Complete       bool                 `json:"complete"`
+	CapturedAt     time.Time            `json:"captured_at"`
+	SBOMDigest     string               `json:"sbom_digest,omitempty"`
+	DBUpdatedAt    *time.Time           `json:"db_updated_at,omitempty"`
 }
 type ScanResult struct {
 	Findings []Finding
@@ -42,6 +45,9 @@ func hashBytes(raw []byte) string { return fmt.Sprintf("%x", sha256.Sum256(raw))
 var imageDigest = regexp.MustCompile(`@sha256:([a-f0-9]{64})$`)
 
 func (s ToolScanner) ScanEvidence(ctx context.Context, r Request, b PolicyBundle) (ScanResult, error) {
+	return s.scanEvidence(ctx, r, b, TrustPolicy{Mode: "disabled"})
+}
+func (s ToolScanner) scanEvidence(ctx context.Context, r Request, b PolicyBundle, trust TrustPolicy) (ScanResult, error) {
 	evidence := &ScanEvidence{Profile: scanProfile(r.Kind), CapturedAt: time.Now().UTC()}
 	result := ScanResult{Evidence: evidence}
 	switch r.Kind {
@@ -81,7 +87,22 @@ func (s ToolScanner) ScanEvidence(ctx context.Context, r Request, b PolicyBundle
 		}
 		evidence.Tool = "trivy"
 		evidence.ToolVersion = v.Version
-		raw, err := runTool(ctx, nil, s.Trivy, "image", "--image-src", "remote", "--scanners", "vuln", "--format", "json", "--quiet", "--timeout", "2m", "--cache-dir", s.CacheDir, "--", r.Target)
+		evidence.SupplyChain, err = verifySupplyChain(ctx, r.Target, trust)
+		if err != nil {
+			return result, err
+		}
+		if _, err = runTool(ctx, nil, s.Trivy, "image", "--download-db-only", "--quiet", "--cache-dir", s.CacheDir); err != nil {
+			return result, err
+		}
+		dbTime, err := readDBUpdatedAt(s.CacheDir)
+		if err != nil {
+			return result, err
+		}
+		evidence.DBUpdatedAt = &dbTime
+		if _, fresh := evidenceDeadline(Job{Request: r, Evidence: evidence}, time.Now().UTC()); !fresh {
+			return result, errors.New("vulnerability DB is stale")
+		}
+		raw, err := runTool(ctx, nil, s.Trivy, "image", "--skip-db-update", "--image-src", "remote", "--scanners", "vuln", "--format", "json", "--quiet", "--timeout", "2m", "--cache-dir", s.CacheDir, "--", r.Target)
 		if err != nil {
 			return result, err
 		}
@@ -126,6 +147,10 @@ func (s ToolScanner) ScanEvidence(ctx context.Context, r Request, b PolicyBundle
 			return result, err
 		}
 		evidence.SBOMDigest = "sha256:" + hashBytes(result.SBOM)
+		after, err := readDBUpdatedAt(s.CacheDir)
+		if err != nil || !after.Equal(dbTime) {
+			return result, errors.New("vulnerability DB changed during scan; retry required")
+		}
 		evidence.Complete = true
 		return result, nil
 	case "trivy_report":
@@ -137,4 +162,17 @@ func (s ToolScanner) ScanEvidence(ctx context.Context, r Request, b PolicyBundle
 		return result, err
 	}
 	return result, errors.New("unsupported evidence profile")
+}
+func readDBUpdatedAt(cache string) (time.Time, error) {
+	raw, err := os.ReadFile(filepath.Join(cache, "db", "metadata.json"))
+	if err != nil {
+		return time.Time{}, errors.New("vulnerability DB metadata unavailable")
+	}
+	var meta struct {
+		UpdatedAt time.Time `json:"UpdatedAt"`
+	}
+	if json.Unmarshal(raw, &meta) != nil || meta.UpdatedAt.IsZero() {
+		return time.Time{}, errors.New("invalid vulnerability DB UpdatedAt")
+	}
+	return meta.UpdatedAt.UTC(), nil
 }

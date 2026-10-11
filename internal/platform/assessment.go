@@ -33,6 +33,7 @@ type WaiverDecision struct {
 	Reason string `json:"reason"`
 }
 type Assessment struct {
+	Trust          *TrustPolicy  `json:"trust_policy,omitempty"`
 	Evidence       *ScanEvidence `json:"evidence,omitempty"`
 	ID             string        `json:"id"`
 	ScanID         string        `json:"scan_id"`
@@ -221,7 +222,10 @@ func (s Store) Assess(ctx context.Context, id, key string) (Assessment, error) {
 			return Assessment{}, errors.New("policy digest mismatch")
 		}
 	}
-	a := Assessment{ID: NewID(), ScanID: id, PolicyDigest: job.PolicyDigest, EvidenceSource: job.EvidenceSource, Evidence: job.Evidence, Subject: p.Subject, EvaluatedAt: now, ValidUntil: now.Add(15 * time.Minute), Original: Summarize(job), AppliedWaivers: []Waiver{}}
+	a := Assessment{Trust: job.Trust, ID: NewID(), ScanID: id, PolicyDigest: job.PolicyDigest, EvidenceSource: job.EvidenceSource, Evidence: job.Evidence, Subject: p.Subject, EvaluatedAt: now, ValidUntil: now.Add(15 * time.Minute), Original: summarizeAt(job, now), AppliedWaivers: []Waiver{}}
+	if deadline, fresh := evidenceDeadline(job, now); fresh && !deadline.IsZero() && deadline.Before(a.ValidUntil) {
+		a.ValidUntil = deadline
+	}
 	a.Effective = Summary{Counts: map[string]int{}, Gate: a.Original.Gate, Reason: a.Original.Reason}
 	for severity, count := range a.Original.Counts {
 		a.Effective.Counts[severity] = count
@@ -262,7 +266,7 @@ func (s Store) Assess(ctx context.Context, id, key string) (Assessment, error) {
 		effectiveJob := job
 		effectiveJob.StoredSummary = &a.Effective
 		effectiveJob.Findings = nil
-		a.Effective = Summarize(effectiveJob)
+		a.Effective = summarizeAt(effectiveJob, now)
 		if len(a.AppliedWaivers) > 0 {
 			a.Effective.Reason += "; approved time-limited waivers applied"
 		}

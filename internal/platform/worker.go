@@ -39,7 +39,11 @@ func (w Worker) Once(ctx context.Context) (bool, error) {
 			if err != nil {
 				scanErr = err
 			} else {
-				result, scanErr = scanner.ScanEvidence(scanCtx, job.Request, bundle)
+				trust := TrustPolicy{Mode: "disabled"}
+				if job.Trust != nil {
+					trust = *job.Trust
+				}
+				result, scanErr = scanner.scanEvidence(scanCtx, job.Request, bundle, trust)
 				findings = result.Findings
 			}
 		}
@@ -74,6 +78,13 @@ func (w Worker) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		default:
+		}
+		if repo, ok := w.Repo.(interface {
+			EnqueueRescan(context.Context) (bool, error)
+		}); ok {
+			if _, err := repo.EnqueueRescan(ctx); err != nil {
+				log.Printf("rescan scheduler: %v", err)
+			}
 		}
 		worked, err := w.Once(ctx)
 		if err != nil {

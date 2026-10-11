@@ -1,0 +1,218 @@
+package platform
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+const evidenceMaxAge = 48 * time.Hour
+const slsaPredicate = "https://slsa.dev/provenance/v1"
+
+// Only operator configuration supplies trust requirements, never request JSON.
+type TrustPolicy struct {
+	Mode      string `json:"mode"`
+	KeyDigest string `json:"key_digest,omitempty"`
+	Identity  string `json:"identity,omitempty"`
+	Issuer    string `json:"issuer,omitempty"`
+	Builder   string `json:"builder,omitempty"`
+}
+type SupplyChainEvidence struct {
+	PolicyDigest       string    `json:"policy_digest"`
+	SignatureVerified  bool      `json:"signature_verified"`
+	ProvenanceVerified bool      `json:"provenance_verified"`
+	VerifiedAt         time.Time `json:"verified_at"`
+	SignatureDigest    string    `json:"signature_digest"`
+	ProvenanceDigest   string    `json:"provenance_digest,omitempty"`
+}
+
+func (p TrustPolicy) Digest() string { raw, _ := json.Marshal(p); return hashBytes(raw) }
+func loadTrustPolicy() (TrustPolicy, error) {
+	p := TrustPolicy{Mode: os.Getenv("SUPPLY_CHAIN_MODE"), Identity: os.Getenv("COSIGN_IDENTITY"), Issuer: os.Getenv("COSIGN_ISSUER"), Builder: os.Getenv("SLSA_BUILDER_ID")}
+	if p.Mode == "" {
+		p.Mode = "disabled"
+	}
+	switch p.Mode {
+	case "disabled":
+		if p.Builder != "" {
+			return p, errors.New("provenance requires enabled signature verification")
+		}
+	case "key":
+		raw, err := readPublicKey(os.Getenv("COSIGN_PUBLIC_KEY"))
+		if err != nil {
+			return p, err
+		}
+		p.KeyDigest = hashBytes(raw)
+	case "keyless":
+		if p.Identity == "" || p.Issuer == "" {
+			return p, errors.New("exact Cosign identity and issuer required")
+		}
+	default:
+		return p, errors.New("unknown supply chain mode")
+	}
+	return p, nil
+}
+func readPublicKey(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, errors.New("operator Cosign public key unavailable")
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, 16385))
+	if err != nil || len(raw) == 0 || len(raw) > 16384 {
+		return nil, errors.New("invalid public key size")
+	}
+	return raw, nil
+}
+func verifySupplyChain(ctx context.Context, target string, p TrustPolicy) (*SupplyChainEvidence, error) {
+	if p.Mode == "disabled" {
+		return nil, nil
+	}
+	binary := os.Getenv("COSIGN_BIN")
+	if binary == "" {
+		binary = localTool("cosign")
+	}
+	args := []string{"--output", "json"}
+	switch p.Mode {
+	case "key":
+		raw, err := readPublicKey(os.Getenv("COSIGN_PUBLIC_KEY"))
+		if err != nil {
+			return nil, err
+		}
+		if hashBytes(raw) != p.KeyDigest {
+			return nil, errors.New("Cosign public key differs from pinned trust policy")
+		}
+		// Materialize the exact hashed bytes, preventing path replacement between read and verify.
+		root := os.Getenv("SCAN_DATA_DIR")
+		if root == "" {
+			root = "data"
+		}
+		dir := filepath.Join(root, "work")
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return nil, err
+		}
+		f, err := os.CreateTemp(dir, "cloudguard-key-*.pub")
+		if err != nil {
+			return nil, err
+		}
+		defer os.Remove(f.Name())
+		if _, err := f.Write(raw); err != nil {
+			f.Close()
+			return nil, err
+		}
+		if err := f.Close(); err != nil {
+			return nil, err
+		}
+		args = append(args, "--key", f.Name())
+	case "keyless":
+		if p.Identity == "" || p.Issuer == "" {
+			return nil, errors.New("invalid pinned keyless policy")
+		}
+		args = append(args, "--certificate-identity", p.Identity, "--certificate-oidc-issuer", p.Issuer)
+	default:
+		return nil, errors.New("unknown trust policy")
+	}
+	raw, err := runTool(ctx, nil, binary, append([]string{"verify"}, append(args, "--", target)...)...)
+	if err != nil {
+		return nil, errors.New("Cosign signature verification failed or unavailable")
+	}
+	var signatures []json.RawMessage
+	if json.Unmarshal(raw, &signatures) != nil || len(signatures) == 0 {
+		return nil, errors.New("empty signature verification evidence")
+	}
+	e := &SupplyChainEvidence{PolicyDigest: p.Digest(), SignatureVerified: true, SignatureDigest: hashBytes(raw), VerifiedAt: time.Now().UTC()}
+	if p.Builder != "" {
+		raw, err = runTool(ctx, nil, binary, append([]string{"verify-attestation"}, append(args, "--type", "slsaprovenance1", "--", target)...)...)
+		if err != nil {
+			return nil, errors.New("Cosign provenance verification failed or unavailable")
+		}
+		if err := checkProvenance(raw, target, p.Builder); err != nil {
+			return nil, err
+		}
+		e.ProvenanceVerified = true
+		e.ProvenanceDigest = hashBytes(raw)
+	}
+	return e, nil
+}
+
+// Cosign emits one verified DSSE envelope per JSON value, not a trusted user report.
+func checkProvenance(raw []byte, target, builder string) error {
+	match := imageDigest.FindStringSubmatch(target)
+	if match == nil {
+		return errors.New("provenance target must be digest pinned")
+	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	valid := false
+	for {
+		var envelope struct {
+			Payload string `json:"payload"`
+		}
+		err := dec.Decode(&envelope)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return errors.New("invalid verified attestation envelope")
+		}
+		payload, err := base64.StdEncoding.DecodeString(envelope.Payload)
+		if err != nil {
+			return errors.New("invalid attestation payload")
+		}
+		var statement struct {
+			Type          string `json:"_type"`
+			PredicateType string `json:"predicateType"`
+			Subject       []struct {
+				Digest map[string]string `json:"digest"`
+			} `json:"subject"`
+			Predicate struct {
+				RunDetails struct {
+					Builder struct {
+						ID string `json:"id"`
+					} `json:"builder"`
+				} `json:"runDetails"`
+			} `json:"predicate"`
+		}
+		if json.Unmarshal(payload, &statement) != nil {
+			return errors.New("invalid provenance statement")
+		}
+		if statement.Type != "https://in-toto.io/Statement/v1" || statement.PredicateType != slsaPredicate || statement.Predicate.RunDetails.Builder.ID != builder {
+			continue
+		}
+		for _, s := range statement.Subject {
+			if s.Digest["sha256"] == match[1] {
+				valid = true
+			}
+		}
+	}
+	if !valid {
+		return errors.New("no verified SLSA v1 statement matched digest and trusted builder")
+	}
+	return nil
+}
+func evidenceDeadline(j Job, now time.Time) (time.Time, bool) {
+	if j.Request.Kind != "image" {
+		return time.Time{}, true
+	}
+	e := j.Evidence
+	if e == nil || e.DBUpdatedAt == nil || e.DBUpdatedAt.IsZero() || e.DBUpdatedAt.After(now.Add(5*time.Minute)) {
+		return time.Time{}, false
+	}
+	deadline := e.DBUpdatedAt.Add(evidenceMaxAge)
+	return deadline, deadline.After(now)
+}
+func supplyChainValid(j Job) bool {
+	if j.Request.Kind != "image" || j.Trust == nil || j.Trust.Mode == "disabled" {
+		return true
+	}
+	if j.Evidence == nil || j.Evidence.SupplyChain == nil {
+		return false
+	}
+	e := j.Evidence.SupplyChain
+	return e.PolicyDigest == j.Trust.Digest() && e.SignatureVerified && (j.Trust.Builder == "" || e.ProvenanceVerified)
+}

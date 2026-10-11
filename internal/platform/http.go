@@ -87,6 +87,9 @@ func (a *API) auth(next http.Handler) http.Handler {
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/assessments") {
 			scope = "assessments:write"
 		}
+		if r.Method != http.MethodGet && (r.URL.Path == "/api/v1/rescans" || strings.HasPrefix(r.URL.Path, "/api/v1/rescans/")) {
+			scope = "rescans:write"
+		}
 		if !p.Allows(scope) {
 			respond(w, 403, map[string]string{"error": "insufficient scope"})
 			return

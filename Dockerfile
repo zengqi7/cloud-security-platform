@@ -12,12 +12,14 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/server &
 
 FROM aquasec/trivy:0.75.0 AS trivy
 FROM openpolicyagent/opa:1.21.1-static AS opa
+FROM ghcr.io/sigstore/cosign/cosign:v3.1.3@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8 AS cosign
 
 FROM alpine:3.24
 RUN apk add --no-cache ca-certificates wget && addgroup -S app && adduser -S -G app app && mkdir -p /data/trivy-cache && chown -R app:app /data
 COPY --from=build /out/ /usr/local/bin/
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 COPY --from=opa /opa /usr/local/bin/opa
+COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign
 COPY policies/ /app/policies/
 WORKDIR /app
 USER app
