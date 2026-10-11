@@ -2,3 +2,4 @@ data/
 tools/
 *.exe
 .env
+dist/

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -241,10 +242,11 @@ func NewToolScanner(root string) (ToolScanner, error) {
 }
 
 func localTool(name string) string {
-	for _, candidate := range []string{
-		filepath.Join("tools", name+".exe"),
-		filepath.Join("tools", name),
-	} {
+	candidates := []string{filepath.Join("tools", name)}
+	if runtime.GOOS == "windows" {
+		candidates = []string{filepath.Join("tools", name+".exe")}
+	}
+	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate
 		}
