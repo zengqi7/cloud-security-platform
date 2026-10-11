@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -171,5 +172,68 @@ func TestConcurrentClaimsRemainUnique(t *testing.T) {
 	}
 	if len(seen) != workers {
 		t.Fatalf("claimed %d unique jobs, want %d", len(seen), workers)
+	}
+}
+
+func TestConcurrentClaimAndFinishLeavesNoRunningLeases(t *testing.T) {
+	db := isolatedDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	if err := migration.Apply(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	store := platform.Store{DB: db}
+	const jobs = 64
+	const workers = 8
+	for i := 0; i < jobs; i++ {
+		if _, _, err := store.Submit(ctx, "settle-race", fmt.Sprintf("job-%d", i), platform.Request{Kind: "image", Target: "alpine:3.24"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var completed atomic.Int64
+	var seen sync.Map
+	errCh := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for completed.Load() < jobs {
+				job, err := store.Claim(ctx)
+				if errors.Is(err, platform.ErrNotFound) {
+					time.Sleep(time.Millisecond)
+					continue
+				}
+				if err != nil {
+					errCh <- err
+					return
+				}
+				if _, loaded := seen.LoadOrStore(job.ID, true); loaded {
+					errCh <- fmt.Errorf("job claimed twice: %s", job.ID)
+					return
+				}
+				if err := store.Finish(ctx, job, nil, nil); err != nil {
+					errCh <- err
+					return
+				}
+				completed.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Errorf("worker failed: %v", err)
+	}
+	if completed.Load() != jobs {
+		t.Fatalf("completed %d jobs, want %d", completed.Load(), jobs)
+	}
+	var succeeded, running int
+	if err := db.QueryRowContext(ctx, `SELECT SUM(status='succeeded'),SUM(status='running') FROM scan_jobs WHERE tenant='settle-race'`).Scan(&succeeded, &running); err != nil {
+		t.Fatal(err)
+	}
+	if succeeded != jobs || running != 0 {
+		t.Fatalf("unexpected terminal state: succeeded=%d running=%d", succeeded, running)
 	}
 }
