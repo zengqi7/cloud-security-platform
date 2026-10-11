@@ -64,7 +64,11 @@ func TestStoreLifecycleIdempotencyAndTenantIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Status != "succeeded" || len(completed.Findings) != 1 || platform.Summarize(completed).Gate != "block" {
+	page, total, err := store.Findings(ctx, tenant, first.ID, "HIGH", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != "succeeded" || total != 1 || len(page) != 1 || platform.Summarize(completed).Gate != "block" {
 		t.Fatalf("invalid completed job: %+v", completed)
 	}
 	if err := store.Finish(ctx, claimed, findings, nil); !errors.Is(err, platform.ErrLeaseLost) {

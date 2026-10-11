@@ -46,7 +46,9 @@ jobs:
       - name: Store integration tests
         env:
           INTEGRATION_MYSQL_DSN: root:root-test-password@tcp(127.0.0.1:3306)/cloud_security?parseTime=true&charset=utf8mb4&loc=UTC
-        run: go test -race -tags=integration ./integration
+        run: |
+          MYSQL_DSN="$INTEGRATION_MYSQL_DSN" go run ./cmd/migrate
+          go test -race -tags=integration ./integration
 
   container:
     runs-on: ubuntu-24.04

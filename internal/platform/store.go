@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"cloud-security-platform/internal/migration"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -23,26 +24,7 @@ func NewID() string {
 	return hex.EncodeToString(id[:])
 }
 func (s Store) Init(ctx context.Context) error {
-	_, err := s.DB.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS scan_jobs (
- id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
- tenant VARCHAR(64) COLLATE utf8mb4_0900_bin NOT NULL,
- idempotency_key VARCHAR(128) COLLATE utf8mb4_0900_bin NOT NULL,
- request_hash CHAR(64) NOT NULL,
- request_json JSON NOT NULL,
- status VARCHAR(16) NOT NULL DEFAULT 'queued',
- attempts INT NOT NULL DEFAULT 0,
- error_text TEXT NULL,
- findings_json JSON NOT NULL,
- lease_token CHAR(32) NULL,
- lease_until DATETIME(3) NULL,
- next_attempt_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
- created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
- finished_at DATETIME(3) NULL,
- UNIQUE KEY uk_tenant_idempotency(tenant,idempotency_key),
- KEY idx_scan_queue(status,next_attempt_at),
- KEY idx_scan_lease(status,lease_until)
- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
-	return err
+	return migration.Apply(ctx, s.DB)
 }
 func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, bool, error) {
 	id := NewID()
@@ -73,14 +55,14 @@ func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, 
 	return job, false, err
 }
 
-const selectJob = `SELECT id,tenant,status,request_json,attempts,COALESCE(error_text,''),findings_json,created_at,finished_at,COALESCE(lease_token,'') FROM scan_jobs `
+const selectJob = `SELECT id,tenant,status,request_json,attempts,COALESCE(error_text,''),summary_json,created_at,finished_at,COALESCE(lease_token,'') FROM scan_jobs `
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanJob(row rowScanner) (Job, error) {
 	var j Job
-	var request, findings []byte
-	err := row.Scan(&j.ID, &j.Tenant, &j.Status, &request, &j.Attempts, &j.Error, &findings, &j.CreatedAt, &j.FinishedAt, &j.LeaseToken)
+	var request, summary []byte
+	err := row.Scan(&j.ID, &j.Tenant, &j.Status, &request, &j.Attempts, &j.Error, &summary, &j.CreatedAt, &j.FinishedAt, &j.LeaseToken)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -90,8 +72,11 @@ func scanJob(row rowScanner) (Job, error) {
 	if err := json.Unmarshal(request, &j.Request); err != nil {
 		return Job{}, err
 	}
-	if err := json.Unmarshal(findings, &j.Findings); err != nil {
-		return Job{}, err
+	if len(summary) > 0 {
+		j.StoredSummary = &Summary{}
+		if err := json.Unmarshal(summary, j.StoredSummary); err != nil {
+			return Job{}, err
+		}
 	}
 	return j, nil
 }
@@ -126,6 +111,12 @@ func (s Store) Claim(ctx context.Context) (Job, error) {
 		return Job{}, err
 	}
 	job, err := scanJob(tx.QueryRowContext(ctx, selectJob+`WHERE attempts<3 AND ((status='queued' AND next_attempt_at<=UTC_TIMESTAMP(3)) OR (status='running' AND lease_until<=UTC_TIMESTAMP(3))) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
+	if errors.Is(err, ErrNotFound) {
+		if err := tx.Commit(); err != nil {
+			return Job{}, err
+		}
+		return Job{}, ErrNotFound
+	}
 	if err != nil {
 		return Job{}, err
 	}
@@ -153,11 +144,18 @@ func (s Store) Finish(ctx context.Context, job Job, findings []Finding, scanErr 
 	if findings == nil {
 		findings = []Finding{}
 	}
-	raw, err := json.Marshal(findings)
+	findings = NormalizeFindings(findings)
+	summaryJob := Job{Status: status, Findings: findings}
+	raw, err := json.Marshal(Summarize(summaryJob))
 	if err != nil {
 		return err
 	}
-	result, err := s.DB.ExecContext(ctx, `UPDATE scan_jobs SET status=?,error_text=?,findings_json=?,lease_token=NULL,lease_until=NULL,next_attempt_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 15 SECOND),finished_at=IF(?='queued',NULL,UTC_TIMESTAMP(3)) WHERE id=? AND tenant=? AND status='running' AND lease_token=?`, status, message, raw, status, job.ID, job.Tenant, job.LeaseToken)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE scan_jobs SET status=?,error_text=?,summary_json=?,lease_token=NULL,lease_until=NULL,next_attempt_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 15 SECOND),finished_at=IF(?='queued',NULL,UTC_TIMESTAMP(3)) WHERE id=? AND tenant=? AND status='running' AND lease_token=? AND lease_until>UTC_TIMESTAMP(3)`, status, message, raw, status, job.ID, job.Tenant, job.LeaseToken)
 	if err != nil {
 		return err
 	}
@@ -168,7 +166,23 @@ func (s Store) Finish(ctx context.Context, job Job, findings []Finding, scanErr 
 	if n != 1 {
 		return ErrLeaseLost
 	}
-	return nil
+	if scanErr == nil {
+		stmt, err := tx.PrepareContext(ctx, `INSERT INTO scan_findings(scan_id,fingerprint,severity,finding_json) VALUES(?,?,?,?)`)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+		for _, f := range findings {
+			raw, err := json.Marshal(f)
+			if err != nil {
+				return err
+			}
+			if _, err := stmt.ExecContext(ctx, job.ID, f.Fingerprint, f.Severity, raw); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 func (s Store) Ping(ctx context.Context) error { return s.DB.PingContext(ctx) }
 func OpenStore(dsn string) (Store, error) {
@@ -186,7 +200,7 @@ func OpenStore(dsn string) (Store, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := s.Init(ctx); err != nil {
+	if err := migration.Verify(ctx, db); err != nil {
 		db.Close()
 		return Store{}, err
 	}

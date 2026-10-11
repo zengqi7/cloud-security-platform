@@ -197,6 +197,15 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 			*dest = n
 		}
 	}
+	if repo, ok := a.Repo.(FindingRepository); ok {
+		items, total, err := repo.Findings(r.Context(), tenant, job.ID, severity, offset, limit)
+		if err != nil {
+			a.failure(w, err)
+			return
+		}
+		respond(w, 200, map[string]any{"items": items, "total": total, "offset": offset, "limit": limit})
+		return
+	}
 	filtered := make([]Finding, 0)
 	for _, f := range job.Findings {
 		if severity == "" || f.Severity == severity {
