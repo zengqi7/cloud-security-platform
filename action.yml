@@ -15,6 +15,9 @@ inputs:
     required: true
   policy-digest:
     description: Published immutable policy digest; omitted selects built-in baseline
+  assess:
+    description: Use point-in-time assessment with approved waivers (requires assessments:write)
+    default: 'false'
   manifest:
     description: Repository-relative Kubernetes YAML/JSON file
   report:
@@ -48,9 +51,11 @@ runs:
         CLOUDGUARD_SARIF: ${{ inputs.sarif }}
         CLOUDGUARD_TIMEOUT: ${{ inputs.timeout }}
         CLOUDGUARD_POLICY: ${{ inputs.policy-digest }}
+        CLOUDGUARD_ASSESS: ${{ inputs.assess }}
       run: |
         args=(-kind "$CLOUDGUARD_KIND" -target "$CLOUDGUARD_TARGET" -sarif "$CLOUDGUARD_SARIF" -timeout "$CLOUDGUARD_TIMEOUT")
         if [[ -n "$CLOUDGUARD_MANIFEST" ]]; then args+=(-manifest "$CLOUDGUARD_MANIFEST"); fi
         if [[ -n "$CLOUDGUARD_REPORT" ]]; then args+=(-report "$CLOUDGUARD_REPORT"); fi
         if [[ -n "$CLOUDGUARD_POLICY" ]]; then args+=(-policy-digest "$CLOUDGUARD_POLICY"); fi
+        if [[ "$CLOUDGUARD_ASSESS" == 'true' ]]; then args+=(-assess); fi
         "$RUNNER_TEMP/cloudguard" "${args[@]}"

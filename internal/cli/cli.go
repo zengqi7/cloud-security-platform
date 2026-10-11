@@ -31,6 +31,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	report := flags.String("report", "", "Trivy JSON report")
 	id := flags.String("scan-id", "", "resume an existing scan")
 	key := flags.String("idempotency-key", "", "submission request key")
+	assess := flags.Bool("assess", false, "create point-in-time assessment using approved waivers (assessments:write required)")
 	sarifPath := flags.String("sarif", "", "write SARIF report to this path")
 	timeout := flags.Duration("timeout", 10*time.Minute, "total polling timeout")
 	interval := flags.Duration("poll-interval", 2*time.Second, "poll interval")
@@ -166,7 +167,20 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 			return fail(errors.New("SARIF output cannot be written"))
 		}
 	}
-	json.NewEncoder(out).Encode(map[string]any{"scan_id": *id, "status": job.Status, "gate": job.Summary.Gate, "reason": job.Summary.Reason})
+	assessmentID := ""
+	if *assess {
+		var assessment platform.Assessment
+		*key = "assessment-" + platform.NewID()
+		if err := request("POST", "/api/v1/scans/"+*id+"/assessments", struct{}{}, &assessment); err != nil {
+			return fail(err)
+		}
+		if assessment.ScanID != *id || assessment.ID == "" || !assessment.ValidUntil.After(time.Now()) {
+			return fail(errors.New("invalid or expired assessment; no release approval"))
+		}
+		assessmentID = assessment.ID
+		job.Summary = assessment.Effective
+	}
+	json.NewEncoder(out).Encode(map[string]any{"scan_id": *id, "status": job.Status, "gate": job.Summary.Gate, "reason": job.Summary.Reason, "assessment_id": assessmentID})
 	if job.Status != "succeeded" {
 		return 3
 	}

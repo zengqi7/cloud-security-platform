@@ -21,6 +21,9 @@ func decodeGovernance(w http.ResponseWriter, r *http.Request, value any) error {
 	return nil
 }
 func (a *API) governance(w http.ResponseWriter, r *http.Request, tenant string) bool {
+	if a.assessmentRoute(w, r, tenant) {
+		return true
+	}
 	if r.URL.Path == "/api/v1/policies" && r.Method == http.MethodPost {
 		var bundle PolicyBundle
 		if err := decodeGovernance(w, r, &bundle); err != nil {
