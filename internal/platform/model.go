@@ -25,6 +25,7 @@ type Request struct {
 	Report       json.RawMessage `json:"report,omitempty"`
 }
 type Job struct {
+	Trust          *TrustPolicy  `json:"trust_policy,omitempty"`
 	AssetID        string        `json:"asset_id"`
 	SeriesID       string        `json:"series_id"`
 	ScopeHash      string        `json:"scope_hash"`
@@ -63,6 +64,9 @@ type Summary struct {
 }
 
 func Summarize(job Job) Summary {
+	return summarizeAt(job, time.Now().UTC())
+}
+func summarizeAt(job Job, now time.Time) Summary {
 	s := Summary{Counts: map[string]int{"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}, Gate: "pending", Reason: "scan has not completed successfully"}
 	if job.StoredSummary != nil {
 		for severity, count := range job.StoredSummary.Counts {
@@ -111,6 +115,16 @@ func Summarize(job Job) Summary {
 		if job.PolicyDigest != "" && (job.Evidence == nil || !job.Evidence.Complete) {
 			s.Gate = "error"
 			s.Reason = "incomplete or unverified scanner evidence; no release approval"
+		}
+		if job.PolicyDigest != "" {
+			if _, fresh := evidenceDeadline(job, now); !fresh {
+				s.Gate = "error"
+				s.Reason = "vulnerability database evidence missing or stale; rescan required"
+			}
+			if !supplyChainValid(job) {
+				s.Gate = "error"
+				s.Reason = "required signature/provenance evidence missing or invalid"
+			}
 		}
 	}
 	return s

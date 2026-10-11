@@ -47,6 +47,14 @@ func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, 
 	if r.Kind == "trivy_report" {
 		source = "ci-import-unverified"
 	}
+	trust, err := loadTrustPolicy()
+	if err != nil {
+		return Job{}, false, err
+	}
+	trustRaw, err := json.Marshal(trust)
+	if err != nil {
+		return Job{}, false, err
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Job{}, false, err
@@ -72,7 +80,7 @@ func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, 
 	if err != nil {
 		return Job{}, false, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO scan_jobs(id,tenant,idempotency_key,request_hash,request_json,findings_json,submitted_by,evidence_source,policy_digest,asset_id,series_id,scope_hash) VALUES(?,?,?,?,?,JSON_ARRAY(),?,?,?,?,?,?)`, id, tenant, key, RequestHash(r), raw, subject, source, policyDigest, asset, series, scope)
+	_, err = tx.ExecContext(ctx, `INSERT INTO scan_jobs(id,tenant,idempotency_key,request_hash,request_json,findings_json,submitted_by,evidence_source,policy_digest,asset_id,series_id,scope_hash,trust_json) VALUES(?,?,?,?,?,JSON_ARRAY(),?,?,?,?,?,?,?)`, id, tenant, key, RequestHash(r), raw, subject, source, policyDigest, asset, series, scope, trustRaw)
 	if err != nil {
 		tx.Rollback()
 		var duplicate *mysqlerr.MySQLError
@@ -101,14 +109,14 @@ func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, 
 	return job, false, err
 }
 
-const selectJob = `SELECT id,tenant,status,request_json,attempts,COALESCE(error_text,''),summary_json,created_at,finished_at,COALESCE(lease_token,''),submitted_by,evidence_source,policy_digest,COALESCE(asset_id,''),COALESCE(series_id,''),scope_hash,evidence_json FROM scan_jobs `
+const selectJob = `SELECT id,tenant,status,request_json,attempts,COALESCE(error_text,''),summary_json,created_at,finished_at,COALESCE(lease_token,''),submitted_by,evidence_source,policy_digest,COALESCE(asset_id,''),COALESCE(series_id,''),scope_hash,evidence_json,trust_json FROM scan_jobs `
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanJob(row rowScanner) (Job, error) {
 	var j Job
-	var request, summary, evidence []byte
-	err := row.Scan(&j.ID, &j.Tenant, &j.Status, &request, &j.Attempts, &j.Error, &summary, &j.CreatedAt, &j.FinishedAt, &j.LeaseToken, &j.SubmittedBy, &j.EvidenceSource, &j.PolicyDigest, &j.AssetID, &j.SeriesID, &j.ScopeHash, &evidence)
+	var request, summary, evidence, trust []byte
+	err := row.Scan(&j.ID, &j.Tenant, &j.Status, &request, &j.Attempts, &j.Error, &summary, &j.CreatedAt, &j.FinishedAt, &j.LeaseToken, &j.SubmittedBy, &j.EvidenceSource, &j.PolicyDigest, &j.AssetID, &j.SeriesID, &j.ScopeHash, &evidence, &trust)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -120,6 +128,11 @@ func scanJob(row rowScanner) (Job, error) {
 	}
 	if len(evidence) > 0 {
 		if err := json.Unmarshal(evidence, &j.Evidence); err != nil {
+			return Job{}, err
+		}
+	}
+	if len(trust) > 0 {
+		if err := json.Unmarshal(trust, &j.Trust); err != nil {
 			return Job{}, err
 		}
 	}

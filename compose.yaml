@@ -6,6 +6,12 @@ x-app-environment: &app-environment
   OPA_BIN: /usr/local/bin/opa
   TRIVY_BIN: /usr/local/bin/trivy
   OPA_POLICY: /app/policies/baseline.rego
+  SUPPLY_CHAIN_MODE: ${SUPPLY_CHAIN_MODE:-disabled}
+  COSIGN_BIN: /usr/local/bin/cosign
+  COSIGN_IDENTITY: ${COSIGN_IDENTITY:-}
+  COSIGN_ISSUER: ${COSIGN_ISSUER:-}
+  SLSA_BUILDER_ID: ${SLSA_BUILDER_ID:-}
+  TUF_ROOT: /data/sigstore
 
 services:
   mysql:

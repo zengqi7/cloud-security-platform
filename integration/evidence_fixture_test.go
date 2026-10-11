@@ -15,5 +15,6 @@ func finishFixture(ctx context.Context, s platform.Store, j platform.Job, findin
 	if j.Request.Kind == "manifest" {
 		profile = "k8s-workloads:rego:v1"
 	}
-	return s.FinishEvidence(ctx, j, platform.ScanResult{Findings: findings, Evidence: &platform.ScanEvidence{Tool: "fixture-scanner", ToolVersion: "1", Profile: profile, ArtifactDigest: "sha256:" + platform.RequestHash(j.Request), Complete: true, CapturedAt: time.Now().UTC()}}, nil)
+	now := time.Now().UTC()
+	return s.FinishEvidence(ctx, j, platform.ScanResult{Findings: findings, Evidence: &platform.ScanEvidence{DBUpdatedAt: &now, Tool: "fixture-scanner", ToolVersion: "1", Profile: profile, ArtifactDigest: "sha256:" + platform.RequestHash(j.Request), Complete: true, CapturedAt: now}}, nil)
 }
