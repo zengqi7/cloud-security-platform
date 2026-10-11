@@ -1,0 +1,207 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Cloud Security Platform",
+    "version": "0.1.0",
+    "description": "Baseline contract. See docs/contracts.md for compatibility and delivery guarantees."
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Successful read"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "503": {
+            "description": "Dependency unavailable"
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Successful read"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "503": {
+            "description": "Dependency unavailable"
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Successful read"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "503": {
+            "description": "Dependency unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/scans": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Successful read"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "503": {
+            "description": "Dependency unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Persisted; execution is asynchronous"
+          },
+          "400": {
+            "description": "Invalid body"
+          },
+          "409": {
+            "description": "Idempotency conflict"
+          },
+          "503": {
+            "description": "Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Successful read"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "503": {
+            "description": "Dependency unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scans/{id}/findings": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Successful read"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "503": {
+            "description": "Dependency unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scans/{id}/summary": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Successful read"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "503": {
+            "description": "Dependency unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}
