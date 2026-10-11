@@ -4,6 +4,16 @@
 
 面向研发流水线的多租户发布门禁与风险治理平台。CI 在部署前提交固定镜像摘要和 Kubernetes workload，平台执行真实扫描并保留证据；发布者读取当前有效门禁评估，安全负责人可进行有期限的双人豁免。
 
+## 工程证据
+
+| 资料 | 内容 |
+|---|---|
+| [最新 Release](https://github.com/zengqi7/cloud-security-platform/releases/latest) | 发行包、checksum、provenance 和版本说明 |
+| [支持矩阵](docs/support-matrix.md) | Go、数据库、Docker、工具版本及平台验证边界 |
+| [容量报告](docs/capacity/v0.1.0.md) | 历史固定负载的吞吐、P95、恢复和资源数据 |
+| [可审计测试输入](capacity/evidence/v0.1.0) | 脱敏样本、汇总、元数据和 SHA-256；可机器复算 |
+| [发行验证](docs/release-verification.md) | 严格验证流程；每次完成结果见 Release notes |
+
 ## 已实现能力
 
 - MySQL 队列、幂等请求、租约/fencing、三次尝试、关系化 finding 分页和 SQL 迁移。
