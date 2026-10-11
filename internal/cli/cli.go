@@ -26,6 +26,8 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	base := flags.String("api", os.Getenv("CLOUDGUARD_API_URL"), "HTTPS API URL (HTTP allowed only on loopback)")
 	kind := flags.String("kind", "manifest", "manifest, image or trivy_report")
 	target := flags.String("target", "", "asset target")
+	asset := flags.String("asset", "", "stable asset identity across artifact revisions")
+	series := flags.String("series", "", "scan series/environment (requires asset)")
 	policy := flags.String("policy-digest", "", "published immutable policy digest; default builtin baseline")
 	manifest := flags.String("manifest", "", "Kubernetes YAML/JSON file")
 	report := flags.String("report", "", "Trivy JSON report")
@@ -92,7 +94,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return nil
 	}
 	if *id == "" {
-		req := platform.Request{Kind: *kind, Target: *target, PolicyDigest: *policy}
+		req := platform.Request{Kind: *kind, Target: *target, PolicyDigest: *policy, Asset: *asset, Series: *series}
 		if *manifest != "" {
 			raw, err := readBounded(*manifest)
 			if err != nil {

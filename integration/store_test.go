@@ -57,7 +57,7 @@ func TestStoreLifecycleIdempotencyAndTenantIsolation(t *testing.T) {
 		FixedVersion:     "2",
 		Title:            "test",
 	}})
-	if err := store.Finish(ctx, claimed, findings, nil); err != nil {
+	if err := finishFixture(ctx, store, claimed, findings); err != nil {
 		t.Fatal(err)
 	}
 	completed, err := store.Get(ctx, tenant, first.ID)

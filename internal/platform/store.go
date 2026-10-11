@@ -68,7 +68,11 @@ func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, 
 	if policyCount != 1 {
 		return Job{}, false, ErrNotFound
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO scan_jobs(id,tenant,idempotency_key,request_hash,request_json,findings_json,submitted_by,evidence_source,policy_digest) VALUES(?,?,?,?,?,JSON_ARRAY(),?,?,?)`, id, tenant, key, RequestHash(r), raw, subject, source, policyDigest)
+	asset, series, scope, err := registerAsset(ctx, tx, tenant, r, policyDigest)
+	if err != nil {
+		return Job{}, false, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO scan_jobs(id,tenant,idempotency_key,request_hash,request_json,findings_json,submitted_by,evidence_source,policy_digest,asset_id,series_id,scope_hash) VALUES(?,?,?,?,?,JSON_ARRAY(),?,?,?,?,?,?)`, id, tenant, key, RequestHash(r), raw, subject, source, policyDigest, asset, series, scope)
 	if err != nil {
 		tx.Rollback()
 		var duplicate *mysqlerr.MySQLError
@@ -97,14 +101,14 @@ func (s Store) Submit(ctx context.Context, tenant, key string, r Request) (Job, 
 	return job, false, err
 }
 
-const selectJob = `SELECT id,tenant,status,request_json,attempts,COALESCE(error_text,''),summary_json,created_at,finished_at,COALESCE(lease_token,''),submitted_by,evidence_source,policy_digest FROM scan_jobs `
+const selectJob = `SELECT id,tenant,status,request_json,attempts,COALESCE(error_text,''),summary_json,created_at,finished_at,COALESCE(lease_token,''),submitted_by,evidence_source,policy_digest,COALESCE(asset_id,''),COALESCE(series_id,''),scope_hash,evidence_json FROM scan_jobs `
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanJob(row rowScanner) (Job, error) {
 	var j Job
-	var request, summary []byte
-	err := row.Scan(&j.ID, &j.Tenant, &j.Status, &request, &j.Attempts, &j.Error, &summary, &j.CreatedAt, &j.FinishedAt, &j.LeaseToken, &j.SubmittedBy, &j.EvidenceSource, &j.PolicyDigest)
+	var request, summary, evidence []byte
+	err := row.Scan(&j.ID, &j.Tenant, &j.Status, &request, &j.Attempts, &j.Error, &summary, &j.CreatedAt, &j.FinishedAt, &j.LeaseToken, &j.SubmittedBy, &j.EvidenceSource, &j.PolicyDigest, &j.AssetID, &j.SeriesID, &j.ScopeHash, &evidence)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -113,6 +117,11 @@ func scanJob(row rowScanner) (Job, error) {
 	}
 	if err := json.Unmarshal(request, &j.Request); err != nil {
 		return Job{}, err
+	}
+	if len(evidence) > 0 {
+		if err := json.Unmarshal(evidence, &j.Evidence); err != nil {
+			return Job{}, err
+		}
 	}
 	if len(summary) > 0 {
 		j.StoredSummary = &Summary{}
@@ -198,6 +207,10 @@ func (s Store) Claim(ctx context.Context) (Job, error) {
 	return job, nil
 }
 func (s Store) Finish(ctx context.Context, job Job, findings []Finding, scanErr error) error {
+	return s.FinishEvidence(ctx, job, ScanResult{Findings: findings}, scanErr)
+}
+func (s Store) FinishEvidence(ctx context.Context, job Job, result ScanResult, scanErr error) error {
+	findings := result.Findings
 	status := "succeeded"
 	message := ""
 	if scanErr != nil {
@@ -221,11 +234,19 @@ func (s Store) Finish(ctx context.Context, job Job, findings []Finding, scanErr 
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE scan_jobs SET status=?,error_text=?,summary_json=?,lease_token=NULL,lease_until=NULL,next_attempt_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 15 SECOND),finished_at=IF(?='queued',NULL,UTC_TIMESTAMP(3)) WHERE id=? AND tenant=? AND status='running' AND lease_token=? AND lease_until>UTC_TIMESTAMP(3)`, status, message, raw, status, job.ID, job.Tenant, job.LeaseToken)
+	evidence, err := json.Marshal(result.Evidence)
 	if err != nil {
 		return err
 	}
-	n, err := result.RowsAffected()
+	var sbom any
+	if len(result.SBOM) > 0 {
+		sbom = []byte(result.SBOM)
+	}
+	settled, err := tx.ExecContext(ctx, `UPDATE scan_jobs SET status=?,error_text=?,summary_json=?,evidence_json=?,sbom_json=?,lease_token=NULL,lease_until=NULL,next_attempt_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 15 SECOND),finished_at=IF(?='queued',NULL,UTC_TIMESTAMP(3)) WHERE id=? AND tenant=? AND status='running' AND lease_token=? AND lease_until>UTC_TIMESTAMP(3)`, status, message, raw, evidence, sbom, status, job.ID, job.Tenant, job.LeaseToken)
+	if err != nil {
+		return err
+	}
+	n, err := settled.RowsAffected()
 	if err != nil {
 		return err
 	}

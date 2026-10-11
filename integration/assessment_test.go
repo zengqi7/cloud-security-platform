@@ -34,7 +34,7 @@ func TestAssessmentApprovalTTLAndImmutableEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Finish(ctx, job, []platform.Finding{{RuleID: "CVE-test", Severity: "HIGH", Resource: "alpine", Package: "libc"}}, nil); err != nil {
+	if err := finishFixture(ctx, s, job, []platform.Finding{{RuleID: "CVE-test", Severity: "HIGH", Resource: "alpine", Package: "libc"}}); err != nil {
 		t.Fatal(err)
 	}
 	findings, _, err := s.Findings(ctx, "acme", job.ID, "", 0, 100)

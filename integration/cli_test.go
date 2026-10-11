@@ -47,7 +47,7 @@ func TestCLIAndSARIFWithRealStorage(t *testing.T) {
 		for i := range findings {
 			findings[i] = platform.Finding{RuleID: fmt.Sprintf("CVE-%d", i), Resource: "alpine", Severity: tc.severity, Title: "dependency risk"}
 		}
-		if err := store.Finish(ctx, job, findings, nil); err != nil {
+		if err := finishFixture(ctx, store, job, findings); err != nil {
 			t.Fatal(err)
 		}
 		path := filepath.Join(t.TempDir(), "result.sarif")

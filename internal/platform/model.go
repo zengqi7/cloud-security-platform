@@ -16,6 +16,8 @@ var ErrConflict = errors.New("idempotency key reused with different request")
 var ErrLeaseLost = errors.New("scan lease lost")
 
 type Request struct {
+	Asset        string          `json:"asset,omitempty"`
+	Series       string          `json:"series,omitempty"`
 	PolicyDigest string          `json:"policy_digest,omitempty"`
 	Kind         string          `json:"kind"`
 	Target       string          `json:"target"`
@@ -23,6 +25,10 @@ type Request struct {
 	Report       json.RawMessage `json:"report,omitempty"`
 }
 type Job struct {
+	AssetID        string        `json:"asset_id"`
+	SeriesID       string        `json:"series_id"`
+	ScopeHash      string        `json:"scope_hash"`
+	Evidence       *ScanEvidence `json:"evidence,omitempty"`
 	PolicyDigest   string        `json:"policy_digest"`
 	Policy         *PolicyBundle `json:"-"`
 	ID             string        `json:"id"`
@@ -102,6 +108,10 @@ func Summarize(job Job) Summary {
 			s.Gate = "error"
 			s.Reason = "policy snapshot unavailable; no release approval"
 		}
+		if job.PolicyDigest != "" && (job.Evidence == nil || !job.Evidence.Complete) {
+			s.Gate = "error"
+			s.Reason = "incomplete or unverified scanner evidence; no release approval"
+		}
 	}
 	return s
 }
@@ -109,6 +119,9 @@ func Summarize(job Job) Summary {
 var imagePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$`)
 
 func Validate(r Request) error {
+	if len(r.Asset) > 255 || len(r.Series) > 128 || (r.Series != "" && strings.TrimSpace(r.Asset) == "") || (r.Asset != "" && strings.TrimSpace(r.Asset) == "") {
+		return errors.New("invalid asset or series identity")
+	}
 	if r.PolicyDigest != "" && !digestPattern.MatchString(r.PolicyDigest) {
 		return errors.New("invalid policy digest")
 	}
