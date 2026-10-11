@@ -198,13 +198,20 @@ func (s Store) Claim(ctx context.Context) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
-	job, err := scanJob(tx.QueryRowContext(ctx, selectJob+`WHERE attempts<3 AND ((status='queued' AND next_attempt_at<=UTC_TIMESTAMP(3)) OR (status='running' AND lease_until<=UTC_TIMESTAMP(3))) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
-	if errors.Is(err, ErrNotFound) {
+	// Lock only the candidate ID so MySQL never carries large JSON/TEXT values
+	// through the queue-order filesort. Read the full row after the lock is held.
+	var jobID string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM scan_jobs WHERE attempts<3 AND ((status='queued' AND next_attempt_at<=UTC_TIMESTAMP(3)) OR (status='running' AND lease_until<=UTC_TIMESTAMP(3))) ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`).Scan(&jobID)
+	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
 			return Job{}, err
 		}
 		return Job{}, ErrNotFound
 	}
+	if err != nil {
+		return Job{}, err
+	}
+	job, err := scanJob(tx.QueryRowContext(ctx, selectJob+`WHERE id=?`, jobID))
 	if err != nil {
 		return Job{}, err
 	}

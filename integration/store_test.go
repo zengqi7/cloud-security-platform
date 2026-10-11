@@ -5,10 +5,14 @@ package integration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"cloud-security-platform/internal/migration"
 	"cloud-security-platform/internal/platform"
 )
 
@@ -73,5 +77,99 @@ func TestStoreLifecycleIdempotencyAndTenantIsolation(t *testing.T) {
 	}
 	if err := store.Finish(ctx, claimed, findings, nil); !errors.Is(err, platform.ErrLeaseLost) {
 		t.Fatalf("stale lease was accepted: %v", err)
+	}
+}
+
+func TestClaimDoesNotSortLargeRequestPayloads(t *testing.T) {
+	db := isolatedDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := migration.Apply(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	// Force the production-default filesort failure with a small session buffer.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if _, err := db.ExecContext(ctx, `SET SESSION sort_buffer_size=32768`); err != nil {
+		t.Fatal(err)
+	}
+	payload := fmt.Sprintf(`{"kind":"manifest","target":"large-batch","manifest":{"padding":"%s"}}`, strings.Repeat("x", 256*1024))
+	for i := 0; i < 30; i++ {
+		id := fmt.Sprintf("%032x", i+1)
+		if _, err := db.ExecContext(ctx, `INSERT INTO scan_jobs(id,tenant,idempotency_key,request_hash,request_json,findings_json) VALUES(?,'large-queue',?,REPEAT('0',64),?,JSON_ARRAY())`, id, fmt.Sprintf("batch-%02d", i), payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	claimed, err := (platform.Store{DB: db}).Claim(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed.ID != fmt.Sprintf("%032x", 1) || claimed.Status != "running" || len(claimed.Request.Manifest) < 256*1024 {
+		t.Fatalf("unexpected claim: id=%s status=%s manifest_bytes=%d", claimed.ID, claimed.Status, len(claimed.Request.Manifest))
+	}
+}
+
+func TestConcurrentClaimsRemainUnique(t *testing.T) {
+	db := isolatedDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := migration.Apply(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	store := platform.Store{DB: db}
+	const workers = 8
+	for i := 0; i < workers; i++ {
+		if _, _, err := store.Submit(ctx, "claim-race", fmt.Sprintf("job-%d", i), platform.Request{Kind: "image", Target: "alpine:3.24"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	start := make(chan struct{})
+	claimed := make(chan platform.Job, workers)
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for {
+				job, err := store.Claim(ctx)
+				if errors.Is(err, platform.ErrNotFound) {
+					select {
+					case <-ctx.Done():
+						errs <- ctx.Err()
+						return
+					case <-time.After(10 * time.Millisecond):
+						continue
+					}
+				}
+				if err != nil {
+					errs <- err
+					return
+				}
+				claimed <- job
+				return
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(claimed)
+	close(errs)
+	for err := range errs {
+		t.Errorf("claim failed: %v", err)
+	}
+	seen := make(map[string]bool, workers)
+	for job := range claimed {
+		if seen[job.ID] {
+			t.Errorf("job claimed twice: %s", job.ID)
+		}
+		seen[job.ID] = true
+	}
+	if len(seen) != workers {
+		t.Fatalf("claimed %d unique jobs, want %d", len(seen), workers)
 	}
 }
