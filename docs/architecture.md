@@ -22,4 +22,4 @@ V1 gate policy blocks any HIGH or CRITICAL finding. This policy is intentionally
 
 ## Trust model
 
-Bearer tokens map to tenants at process startup. Imported Trivy reports are trusted input from authenticated automation, not cryptographic attestations. For supply-chain enforcement, add signed provenance verification before enabling imported reports outside a trusted network.
+Database API keys carry tenant, subject, expiry and scopes; revoked/expired keys are rejected on each request. Imported Trivy reports require reports:import and are explicitly unverified input, not cryptographic attestations. A clean imported report cannot pass the release gate. See authentication.md for lifecycle and audit semantics.
