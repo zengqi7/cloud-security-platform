@@ -31,6 +31,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 }
 func runTool(ctx context.Context, input []byte, binary string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Env = toolEnvironment(ctx)
 	if input != nil {
 		cmd.Stdin = bytes.NewReader(input)
 	}
@@ -42,7 +43,8 @@ func runTool(ctx context.Context, input []byte, binary string, args ...string) (
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("scanner failed: %w: %.1024s", err, stderr.String())
+		// Tool stderr may contain registry tokens, credential URLs or headers.
+		return nil, errors.New("scanner process failed; inspect restricted tool diagnostics")
 	}
 	return stdout.Bytes(), nil
 }
@@ -214,6 +216,11 @@ func object(v any) map[string]any {
 }
 
 func NewToolScanner(root string) (ToolScanner, error) {
+	for _, name := range []string{"TRIVY_USERNAME", "TRIVY_PASSWORD", "TRIVY_REGISTRY_TOKEN"} {
+		if os.Getenv(name) != "" {
+			return ToolScanner{}, errors.New("global registry credentials forbidden; configure tenant references")
+		}
+	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return ToolScanner{}, err

@@ -19,3 +19,7 @@
   P0 PR #33 merged after all CI checks passed.
 - P1 PR #34 all CI checks passed. P2 implements shared MySQL TLS/pool config,
   S3 SDK v2 integrity-checked dual writes, fenced linking and quarantined GC.
+- P2 PR #35 opened. P3 implements RFC 9068 access-token OIDC, server-side
+  expiring identity memberships, tenant/host registry credential references,
+  per-job credential files and scanner child environment isolation.
+- GitHub status request once returned EOF; safe read will be retried later.

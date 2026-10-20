@@ -46,7 +46,13 @@ func (w Worker) Once(ctx context.Context) (bool, error) {
 				if job.Trust != nil {
 					trust = *job.Trust
 				}
-				result, scanErr = scanner.scanEvidence(scanCtx, job.Request, bundle, trust)
+				registryCtx, cleanup, err := scanner.registryContext(scanCtx, job.Tenant, job.Request)
+				if err != nil {
+					scanErr = err
+				} else {
+					result, scanErr = scanner.scanEvidence(registryCtx, job.Request, bundle, trust)
+				}
+				cleanup()
 				findings = result.Findings
 			}
 		}

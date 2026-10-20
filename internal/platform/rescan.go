@@ -27,7 +27,7 @@ func (s Store) CreateRescan(ctx context.Context, r RescanRequest) (RescanSchedul
 	if err != nil {
 		return RescanSchedule{}, err
 	}
-	if !p.Allows("scans:submit") {
+	if !p.Allows("scans:submit") || p.KeyID == 0 {
 		return RescanSchedule{}, auth.ErrUnauthorized
 	}
 	if !scanID.MatchString(r.ScanID) || r.IntervalSeconds < 3600 || r.IntervalSeconds > 30*86400 {

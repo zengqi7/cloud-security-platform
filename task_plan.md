@@ -19,7 +19,7 @@ Evolve the v0.1.1 CI/CD scan gate into a production cloud-native security contro
 | P0 contracts/regression | codex/v0.2.0-p0-contracts | PR #33 merged, CI passed |
 | P1 Helm/HA | codex/v0.2.0-p1-kubernetes | PR #34 CI passed |
 | P2 MySQL/object storage | codex/v0.2.0-p2-storage | implemented, verifying |
-| P3 OIDC/registry credentials | codex/v0.2.0-p3-identity | pending |
+| P3 OIDC/registry credentials | codex/v0.2.0-p3-identity | implemented, verifying |
 | P4 evidence | codex/v0.2.0-p4-evidence | pending |
 | P5 observability | codex/v0.2.0-p5-observability | pending |
 | P6 recovery/capacity | codex/v0.2.0-p6-validation | pending |

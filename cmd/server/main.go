@@ -22,7 +22,13 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.DB.Close()
-	api := &platform.API{Repo: store, Auth: store}
+	authCtx, authCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	authenticator, err := platform.RuntimeAuth(authCtx, store)
+	authCancel()
+	if err != nil {
+		log.Fatal(err)
+	}
+	api := &platform.API{Repo: store, Auth: authenticator}
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8082"

@@ -16,13 +16,14 @@ var ErrConflict = errors.New("idempotency key reused with different request")
 var ErrLeaseLost = errors.New("scan lease lost")
 
 type Request struct {
-	Asset        string          `json:"asset,omitempty"`
-	Series       string          `json:"series,omitempty"`
-	PolicyDigest string          `json:"policy_digest,omitempty"`
-	Kind         string          `json:"kind"`
-	Target       string          `json:"target"`
-	Manifest     json.RawMessage `json:"manifest,omitempty"`
-	Report       json.RawMessage `json:"report,omitempty"`
+	RegistryCredential string          `json:"registry_credential,omitempty"`
+	Asset              string          `json:"asset,omitempty"`
+	Series             string          `json:"series,omitempty"`
+	PolicyDigest       string          `json:"policy_digest,omitempty"`
+	Kind               string          `json:"kind"`
+	Target             string          `json:"target"`
+	Manifest           json.RawMessage `json:"manifest,omitempty"`
+	Report             json.RawMessage `json:"report,omitempty"`
 }
 type Job struct {
 	Trust          *TrustPolicy  `json:"trust_policy,omitempty"`
@@ -133,6 +134,9 @@ func summarizeAt(job Job, now time.Time) Summary {
 var imagePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$`)
 
 func Validate(r Request) error {
+	if r.RegistryCredential != "" && (r.Kind != "image" || !credentialRef.MatchString(r.RegistryCredential)) {
+		return errors.New("invalid registry credential reference")
+	}
 	if len(r.Asset) > 255 || len(r.Series) > 128 || (r.Series != "" && strings.TrimSpace(r.Asset) == "") || (r.Asset != "" && strings.TrimSpace(r.Asset) == "") {
 		return errors.New("invalid asset or series identity")
 	}
