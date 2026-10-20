@@ -1,10 +1,9 @@
 package main
 
 import (
+	"cloud-security-platform/internal/database"
 	"cloud-security-platform/internal/migration"
 	"context"
-	"database/sql"
-	_ "github.com/go-sql-driver/mysql"
 	"log"
 	"os"
 	"time"
@@ -15,7 +14,7 @@ func main() {
 	if dsn == "" {
 		log.Fatal("MYSQL_DSN required")
 	}
-	db, err := sql.Open("mysql", dsn)
+	db, err := database.Open(dsn)
 	if err != nil {
 		log.Fatal("database open failed")
 	}

@@ -2,6 +2,8 @@ package platform
 
 import (
 	"cloud-security-platform/internal/auth"
+	"cloud-security-platform/internal/blob"
+	"cloud-security-platform/internal/database"
 	"cloud-security-platform/internal/migration"
 	"context"
 	"crypto/rand"
@@ -15,7 +17,10 @@ import (
 	mysqlerr "github.com/go-sql-driver/mysql"
 )
 
-type Store struct{ DB *sql.DB }
+type Store struct {
+	DB      *sql.DB
+	Objects blob.Store
+}
 
 const transactionRetryLimit = 3
 
@@ -304,6 +309,14 @@ func (s Store) FinishEvidence(ctx context.Context, job Job, result ScanResult, s
 	var sbom any
 	if len(result.SBOM) > 0 {
 		sbom = []byte(result.SBOM)
+		if scanErr == nil && s.Objects != nil {
+			if result.Evidence == nil {
+				return errors.New("SBOM evidence missing")
+			}
+			if _, err := s.archive(ctx, job, "sbom", result.Evidence.SBOMDigest, result.SBOM); err != nil {
+				return err
+			}
+		}
 	}
 	return retryTransaction(ctx, func() error {
 		return s.finishEvidenceOnce(ctx, job, status, message, raw, evidence, sbom, findings, scanErr)
@@ -328,6 +341,9 @@ func (s Store) finishEvidenceOnce(ctx context.Context, job Job, status, message 
 		return ErrLeaseLost
 	}
 	if scanErr == nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE evidence_objects SET linked=TRUE WHERE tenant=? AND scan_id=? AND lease_token=?`, job.Tenant, job.ID, job.LeaseToken); err != nil {
+			return err
+		}
 		stmt, err := tx.PrepareContext(ctx, `INSERT INTO scan_findings(scan_id,fingerprint,severity,finding_json) VALUES(?,?,?,?)`)
 		if err != nil {
 			return err
@@ -347,13 +363,10 @@ func (s Store) finishEvidenceOnce(ctx context.Context, job Job, status, message 
 }
 func (s Store) Ping(ctx context.Context) error { return s.DB.PingContext(ctx) }
 func OpenStore(dsn string) (Store, error) {
-	db, err := sql.Open("mysql", dsn)
+	db, err := database.Open(dsn)
 	if err != nil {
 		return Store{}, err
 	}
-	db.SetMaxOpenConns(12)
-	db.SetMaxIdleConns(4)
-	db.SetConnMaxLifetime(5 * time.Minute)
 	s := Store{DB: db}
 	if err := waitForMySQL(s, 60*time.Second); err != nil {
 		db.Close()
@@ -365,6 +378,12 @@ func OpenStore(dsn string) (Store, error) {
 		db.Close()
 		return Store{}, err
 	}
+	objects, err := blob.FromEnv(ctx)
+	if err != nil {
+		db.Close()
+		return Store{}, err
+	}
+	s.Objects = objects
 	return s, nil
 }
 
