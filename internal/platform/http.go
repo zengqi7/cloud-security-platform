@@ -178,6 +178,22 @@ func (a *API) route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) == 6 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "scans" && scanID.MatchString(parts[3]) && parts[4] == "evidence" && validArtifactKind(parts[5]) && r.Method == http.MethodGet {
+		repo, ok := a.Repo.(interface {
+			Artifact(context.Context, string, string, string) (json.RawMessage, error)
+		})
+		if !ok {
+			respond(w, 503, map[string]string{"error": "evidence unavailable"})
+			return
+		}
+		raw, err := repo.Artifact(r.Context(), tenant, parts[3], parts[5])
+		if err != nil {
+			a.failure(w, err)
+			return
+		}
+		respond(w, 200, raw)
+		return
+	}
 	if len(parts) < 4 || len(parts) > 5 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "scans" || !scanID.MatchString(parts[3]) {
 		respond(w, 404, map[string]string{"error": "not found"})
 		return
