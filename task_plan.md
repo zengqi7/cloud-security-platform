@@ -12,6 +12,25 @@ Evolve the v0.1.1 CI/CD scan gate into a production cloud-native security contro
 
 ## Phase Order
 
+### Active v0.2.0 implementation (supersedes broad roadmap numbering below)
+
+| Phase | Branch | Status |
+|---|---|---|
+| P0 contracts/regression | codex/v0.2.0-p0-contracts | committed/pushed, baseline tests running |
+| P1 Helm/HA | codex/v0.2.0-p1-kubernetes | next |
+| P2 MySQL/object storage | codex/v0.2.0-p2-storage | pending |
+| P3 OIDC/registry credentials | codex/v0.2.0-p3-identity | pending |
+| P4 evidence | codex/v0.2.0-p4-evidence | pending |
+| P5 observability | codex/v0.2.0-p5-observability | pending |
+| P6 recovery/capacity | codex/v0.2.0-p6-validation | pending |
+
+Branches stack on their predecessor and PRs merge in dependency order. No
+production release or SLA is claimed without real staging/recovery/soak evidence.
+Untracked results/ is preserved and excluded from commits. Docker Desktop was
+stopped at resumption; startup requested. Helm missing; install verified binary.
+Previous Git schannel push failed; subsequent read and push succeeded without
+disabling TLS verification.
+
 1. P0-Baseline and contract freeze
 2. P1-Production foundation and Kubernetes deployment
 3. P2-Supply-chain evidence hardening
