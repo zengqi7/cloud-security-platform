@@ -8,6 +8,21 @@ permissions:
   contents: read
 
 jobs:
+  helm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install verified Helm
+        run: |
+          curl -fsSL https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz -o /tmp/helm.tar.gz
+          curl -fsSL https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz.sha256sum -o /tmp/helm.sha256sum
+          cd /tmp
+          sed 's/helm-v3.19.0-linux-amd64.tar.gz/helm.tar.gz/' helm.sha256sum | sha256sum -c -
+          tar -xzf helm.tar.gz
+          sudo install linux-amd64/helm /usr/local/bin/helm
+      - name: Lint and render HA chart and migration variants
+        run: bash scripts/check-helm.sh
+
   benchmark-evidence:
     runs-on: ubuntu-24.04
     steps:

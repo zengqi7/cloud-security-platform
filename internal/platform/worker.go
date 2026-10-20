@@ -14,10 +14,13 @@ type WorkRepository interface {
 type Worker struct {
 	Repo    WorkRepository
 	Scanner Scanner
+	Health  *WorkerHealth
 }
 
 func (w Worker) Once(ctx context.Context) (bool, error) {
-	job, err := w.Repo.Claim(ctx)
+	claimCtx, claimCancel := context.WithTimeout(ctx, 5*time.Second)
+	job, err := w.Repo.Claim(claimCtx)
+	claimCancel()
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
@@ -71,6 +74,11 @@ func (w Worker) Once(ctx context.Context) (bool, error) {
 	return true, nil
 }
 func (w Worker) Run(ctx context.Context) error {
+	if w.Health != nil {
+		w.Health.Progress()
+		w.Health.ready.Store(true)
+		defer w.Health.ready.Store(false)
+	}
 	timer := time.NewTicker(time.Second)
 	defer timer.Stop()
 	for {
@@ -79,10 +87,16 @@ func (w Worker) Run(ctx context.Context) error {
 			return nil
 		default:
 		}
+		if w.Health != nil {
+			w.Health.Progress()
+		}
 		if repo, ok := w.Repo.(interface {
 			EnqueueRescan(context.Context) (bool, error)
 		}); ok {
-			if _, err := repo.EnqueueRescan(ctx); err != nil {
+			scheduleCtx, scheduleCancel := context.WithTimeout(ctx, 5*time.Second)
+			_, err := repo.EnqueueRescan(scheduleCtx)
+			scheduleCancel()
+			if err != nil {
 				log.Printf("rescan scheduler: %v", err)
 			}
 		}

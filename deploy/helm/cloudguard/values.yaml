@@ -1,0 +1,54 @@
+# Supply an immutable image built from a reviewed commit. No floating default.
+image:
+  repository: ghcr.io/zengqi7/cloud-security-platform
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+database:
+  # Both Secrets must contain MYSQL_DSN. Runtime account has no DDL grants.
+  runtimeSecret: ""
+  migrationSecret: ""
+env:
+  SCAN_DATA_DIR: /data
+  OPA_BIN: /usr/local/bin/opa
+  OPA_POLICY: /app/policies/baseline.rego
+  TRIVY_BIN: /usr/local/bin/trivy
+  COSIGN_BIN: /usr/local/bin/cosign
+  TUF_ROOT: /data/sigstore
+  SUPPLY_CHAIN_MODE: disabled
+# Additional existing Secrets (OIDC configuration, cloud credentials, etc.).
+# Never put credentials in env or Helm release values.
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+api:
+  replicas: 3
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+worker:
+  replicas: 2
+  resources:
+    requests: {cpu: "1", memory: 1Gi}
+    limits: {cpu: "2", memory: 4Gi}
+  dataSizeLimit: 10Gi
+service:
+  port: 8082
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tlsSecret: ""
+networkPolicy:
+  enabled: true
+  # Explicit peer rules required for external MySQL, DNS, registry, OIDC,
+  # object storage and telemetry. Empty egress intentionally denies all.
+  egress: []
+  # API callers/Ingress controller and Prometheus; worker has no public Service.
+  ingress: []
+migration:
+  # Render a standalone Job and run it BEFORE installing/upgrading workloads.
+  # Kept outside Helm lifecycle: a new schema can reject old runtime binaries.
+  enabled: false
+  id: initial
