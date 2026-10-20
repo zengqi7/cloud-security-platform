@@ -27,3 +27,6 @@
   Corrected the unapplied P2 migration before merge; tenant index also uses
   binary collation to preserve existing case-sensitive isolation. Existing
   released migrations remain untouched. Re-run uses a fresh CI database.
+- P3 local JWT/JWKS and registry isolation/rotation tests passed; PR opened.
+- P4 adds raw evidence archives, versioned digest bindings, verifier identity,
+  bounded signature freshness, key-ring rotation and emergency trust revocation.

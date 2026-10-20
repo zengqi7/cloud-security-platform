@@ -14,6 +14,7 @@ import (
 )
 
 type ScanEvidence struct {
+	Artifacts      []ArtifactReference  `json:"artifacts,omitempty"`
 	SupplyChain    *SupplyChainEvidence `json:"supply_chain,omitempty"`
 	Tool           string               `json:"tool"`
 	ToolVersion    string               `json:"tool_version"`
@@ -25,9 +26,10 @@ type ScanEvidence struct {
 	DBUpdatedAt    *time.Time           `json:"db_updated_at,omitempty"`
 }
 type ScanResult struct {
-	Findings []Finding
-	Evidence *ScanEvidence
-	SBOM     json.RawMessage
+	Artifacts map[string]json.RawMessage
+	Findings  []Finding
+	Evidence  *ScanEvidence
+	SBOM      json.RawMessage
 }
 
 func scanProfile(kind string) string {
@@ -125,6 +127,13 @@ func (s ToolScanner) scanEvidence(ctx context.Context, r Request, b PolicyBundle
 		}
 		evidence.ArtifactDigest = "sha256:" + match[1]
 		result.Findings, err = NormalizeTrivy(raw)
+		result.Artifacts = map[string]json.RawMessage{"report": append([]byte(nil), raw...)}
+		if evidence.SupplyChain != nil {
+			result.Artifacts["signature"] = evidence.SupplyChain.signature
+			if len(evidence.SupplyChain.provenance) > 0 {
+				result.Artifacts["provenance"] = evidence.SupplyChain.provenance
+			}
+		}
 		if err != nil {
 			return result, err
 		}

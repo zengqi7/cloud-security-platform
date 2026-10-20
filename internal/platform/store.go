@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	mysqlerr "github.com/go-sql-driver/mysql"
@@ -301,6 +302,16 @@ func (s Store) FinishEvidence(ctx context.Context, job Job, result ScanResult, s
 	raw, err := json.Marshal(Summarize(summaryJob))
 	if err != nil {
 		return err
+	}
+	if scanErr == nil && len(result.Artifacts) > 0 {
+		if s.Objects == nil && os.Getenv("EVIDENCE_REQUIRE_ARCHIVE") == "true" {
+			return errors.New("raw evidence archival requires object storage")
+		}
+		if s.Objects != nil {
+			if err := s.archiveArtifacts(ctx, job, &result); err != nil {
+				return err
+			}
+		}
 	}
 	evidence, err := json.Marshal(result.Evidence)
 	if err != nil {
