@@ -15,13 +15,13 @@ FROM openpolicyagent/opa:1.21.1-static@sha256:4675ab04ad1627f74741d2d9c5142698c7
 FROM ghcr.io/sigstore/cosign/cosign:v3.1.3@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8 AS cosign
 
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
-RUN apk add --no-cache ca-certificates wget && addgroup -S app && adduser -S -G app app && mkdir -p /data/trivy-cache && chown -R app:app /data
+RUN apk add --no-cache ca-certificates wget && addgroup -S -g 10001 app && adduser -S -u 10001 -G app app && mkdir -p /data/trivy-cache && chown -R app:app /data
 COPY --from=build /out/ /usr/local/bin/
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 COPY --from=opa /opa /usr/local/bin/opa
 COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign
 COPY policies/ /app/policies/
 WORKDIR /app
-USER app
-EXPOSE 8082
+USER 10001:10001
+EXPOSE 8082 8083
 ENTRYPOINT ["/usr/local/bin/api"]

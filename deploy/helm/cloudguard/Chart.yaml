@@ -1,0 +1,7 @@
+apiVersion: v2
+name: cloudguard
+description: CloudGuard Production Gate API and leased scan workers
+type: application
+version: 0.2.0
+appVersion: "0.2.0-rc"
+kubeVersion: ">=1.29.0-0"
