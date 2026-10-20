@@ -8,6 +8,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/server &
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/cloudguard ./cmd/cloudguard && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/key ./cmd/key && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/evidence-gc ./cmd/evidence-gc && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
 
 FROM aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa AS trivy

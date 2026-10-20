@@ -17,3 +17,5 @@
 - P1 local validation passed: platform/worker Go tests and vet; verified Helm
   v3.19.0 archive SHA256; strict chart lint and migration/TLS render variants.
   P0 PR #33 merged after all CI checks passed.
+- P1 PR #34 all CI checks passed. P2 implements shared MySQL TLS/pool config,
+  S3 SDK v2 integrity-checked dual writes, fenced linking and quarantined GC.

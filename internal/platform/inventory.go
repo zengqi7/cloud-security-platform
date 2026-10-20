@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"sort"
 )
 
@@ -170,8 +171,14 @@ func (s Store) SBOM(ctx context.Context, tenant, id string) (json.RawMessage, er
 		return nil, err
 	}
 	var raw []byte
-	if err := s.DB.QueryRowContext(ctx, `SELECT sbom_json FROM scan_jobs WHERE tenant=? AND id=?`, tenant, id).Scan(&raw); err != nil {
+	raw, err = s.readObject(ctx, tenant, id, "sbom")
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
+	}
+	if errors.Is(err, ErrNotFound) {
+		if err := s.DB.QueryRowContext(ctx, `SELECT sbom_json FROM scan_jobs WHERE tenant=? AND id=?`, tenant, id).Scan(&raw); err != nil {
+			return nil, err
+		}
 	}
 	if len(raw) == 0 {
 		return nil, ErrNotFound
