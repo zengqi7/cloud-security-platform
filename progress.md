@@ -23,3 +23,7 @@
   expiring identity memberships, tenant/host registry credential references,
   per-job credential files and scanner child environment isolation.
 - GitHub status request once returned EOF; safe read will be retried later.
+- CI found the new evidence FK did not match scan_jobs.id ASCII/binary charset.
+  Corrected the unapplied P2 migration before merge; tenant index also uses
+  binary collation to preserve existing case-sensitive isolation. Existing
+  released migrations remain untouched. Re-run uses a fresh CI database.
